@@ -1,6 +1,6 @@
 use std::str::Chars;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenType<'a> {
     LeftParen,
     RightParen,
@@ -49,9 +49,9 @@ pub enum TokenType<'a> {
 
 #[derive(Debug)]
 pub struct Token<'a> {
-    token_type: TokenType<'a>,
-    lexeme: &'a str,
-    line: u32,
+    pub token_type: TokenType<'a>,
+    pub lexeme: &'a str,
+    pub line: u32,
 }
 
 impl<'a> std::cmp::PartialEq for Token<'a> {
