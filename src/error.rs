@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 #[derive(Debug)]
 pub enum LoxError {
     ParserError(Option<u32>, String),
+    LexerError(u32, String),
 }
 
 impl Display for LoxError {
@@ -13,6 +14,9 @@ impl Display for LoxError {
             }
             LoxError::ParserError(None, ref reason) => {
                 write!(f, "Error while parsing in last line: {}", reason)
+            }
+            LoxError::LexerError(line, ref reason) => {
+                write!(f, "Error while scanning in line {}: {}", line, reason)
             }
         }
     }

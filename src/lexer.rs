@@ -1,3 +1,4 @@
+use crate::error::{LoxError, Result};
 use std::str::Chars;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -79,17 +80,19 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn string(&mut self, start_pos: usize) -> Option<TokenType<'a>> {
+    fn string(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
         while let Some((pos, ch)) = self.source_iter.next() {
             if ch == '"' {
-                return Some(TokenType::String(&self.source[start_pos..pos]));
+                return Ok(TokenType::String(&self.source[start_pos..pos]));
             }
         }
-        eprintln!("Unterminatd string");
-        None
+        Err(LoxError::LexerError(
+            self.line,
+            "Unterminated string".to_string(),
+        ))
     }
 
-    fn number(&mut self, start_pos: usize) -> Option<TokenType<'a>> {
+    fn number(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
         while self.is_digit() {
             self.source_iter.next();
         }
@@ -108,16 +111,16 @@ impl<'a> Lexer<'a> {
         }
 
         let number = &self.source[start_pos..self.end_pos()];
-        Some(TokenType::Number(number.parse().unwrap()))
+        Ok(TokenType::Number(number.parse().unwrap()))
     }
 
-    fn identifier(&mut self, start_pos: usize) -> Option<TokenType<'a>> {
+    fn identifier(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
         while self.is_alpha() || self.is_digit() {
             self.source_iter.next();
         }
         let text = &self.source[start_pos..self.end_pos()];
 
-        Some(match text {
+        Ok(match text {
             "and" => TokenType::And,
             "class" => TokenType::Class,
             "else" => TokenType::Else,
@@ -177,48 +180,48 @@ impl<'a> Lexer<'a> {
 }
 
 impl<'a> Iterator for Lexer<'a> {
-    type Item = Token<'a>;
+    type Item = Result<Token<'a>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((pos, ch)) = self.source_iter.next() {
             self.start = pos;
             let token_type = match ch {
-                '(' => Some(TokenType::LeftParen),
-                ')' => Some(TokenType::RightParen),
-                '{' => Some(TokenType::LeftBrace),
-                '}' => Some(TokenType::RightBrace),
-                ',' => Some(TokenType::Comma),
-                '.' => Some(TokenType::Dot),
-                '+' => Some(TokenType::Plus),
-                '-' => Some(TokenType::Minus),
-                '*' => Some(TokenType::Star),
-                ';' => Some(TokenType::Semicolon),
+                '(' => Ok(TokenType::LeftParen),
+                ')' => Ok(TokenType::RightParen),
+                '{' => Ok(TokenType::LeftBrace),
+                '}' => Ok(TokenType::RightBrace),
+                ',' => Ok(TokenType::Comma),
+                '.' => Ok(TokenType::Dot),
+                '+' => Ok(TokenType::Plus),
+                '-' => Ok(TokenType::Minus),
+                '*' => Ok(TokenType::Star),
+                ';' => Ok(TokenType::Semicolon),
                 '!' => {
                     if self.matches('=') {
-                        Some(TokenType::BangEqual)
+                        Ok(TokenType::BangEqual)
                     } else {
-                        Some(TokenType::Bang)
+                        Ok(TokenType::Bang)
                     }
                 }
                 '=' => {
                     if self.matches('=') {
-                        Some(TokenType::EqualEqual)
+                        Ok(TokenType::EqualEqual)
                     } else {
-                        Some(TokenType::Equal)
+                        Ok(TokenType::Equal)
                     }
                 }
                 '<' => {
                     if self.matches('=') {
-                        Some(TokenType::LessEqual)
+                        Ok(TokenType::LessEqual)
                     } else {
-                        Some(TokenType::Less)
+                        Ok(TokenType::Less)
                     }
                 }
                 '>' => {
                     if self.matches('=') {
-                        Some(TokenType::GreaterEqual)
+                        Ok(TokenType::GreaterEqual)
                     } else {
-                        Some(TokenType::Greater)
+                        Ok(TokenType::Greater)
                     }
                 }
                 '/' => {
@@ -226,55 +229,58 @@ impl<'a> Iterator for Lexer<'a> {
                         while !self.matches('\n') {
                             self.source_iter.next();
                         }
-                        None
+                        return self.next();
                     } else {
-                        Some(TokenType::Slash)
+                        Ok(TokenType::Slash)
                     }
                 }
-                ' ' => None,
-                '\r' => None,
-                '\t' => None,
+                ' ' | '\r' | '\t' => return self.next(),
                 '\n' => {
                     self.line += 1;
-                    None
+                    return self.next();
                 }
                 '"' => self.string(pos + 1),
                 '0'..='9' => self.number(pos),
                 'a'..='z' | 'A'..='Z' | '_' => self.identifier(pos),
                 _ => {
-                    eprintln!("Unexpected character '{}'", ch);
-                    None
+                    return Some(Err(LoxError::LexerError(
+                        self.line,
+                        format!("Unexpected character '{}'", ch),
+                    )));
                 }
             };
-            if token_type.is_none() {
+            if token_type.is_err() {
                 return self.next();
+            } else {
+                Some(Ok(Token {
+                    token_type: token_type.unwrap(),
+                    lexeme: &self.source[self.start..self.end_pos()],
+                    line: self.line,
+                }))
             }
-
-            Some(Token {
-                token_type: token_type.unwrap(),
-                lexeme: &self.source[self.start..self.end_pos()],
-                line: self.line,
-            })
         } else {
             if self.eof_returned {
                 None
             } else {
                 self.eof_returned = true;
-                Some(Token {
+                Some(Ok(Token {
                     token_type: TokenType::Eof,
                     lexeme: "",
                     line: self.line,
-                })
+                }))
             }
         }
     }
 }
 
-pub fn lex(source: &str) -> Vec<Token> {
+pub fn lex(source: &str) -> (Vec<Token>, Vec<LoxError>) {
     let lexer = Lexer::new(source);
-    let tokens = lexer.collect();
 
-    tokens
+    let (tokens, errors): (Vec<_>, Vec<_>) = lexer.partition(Result::is_ok);
+    let tokens = tokens.into_iter().map(Result::unwrap).collect();
+    let errors = errors.into_iter().map(Result::unwrap_err).collect();
+
+    (tokens, errors)
 }
 
 #[cfg(test)]
@@ -292,7 +298,7 @@ mod tests {
                 return 42;
             }
         "#;
-        let tokens = lex(source);
+        let (tokens, errors) = lex(source);
         let expected_tokens = vec![
             Token {
                 token_type: TokenType::Var,
@@ -370,6 +376,7 @@ mod tests {
                 line: 5,
             },
         ];
+        assert_eq!(errors.len(), 0);
         assert_eq!(tokens, expected_tokens);
     }
 }

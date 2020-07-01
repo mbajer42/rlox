@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn simple_mathematical_expression() {
         let source = "(3 + 4) * 6";
-        let tokens = lexer::lex(source);
+        let (tokens, _) = lexer::lex(source);
         let (expressions, errors) = parse(&tokens);
         assert_eq!(errors.len(), 0);
         assert_eq!(expressions.len(), 1);
