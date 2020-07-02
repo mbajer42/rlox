@@ -1,23 +1,26 @@
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 
 #[derive(Debug)]
 pub enum LoxError {
-    ParserError(Option<u32>, String),
-    LexerError(u32, String),
+    ParserError(Option<u32>, Cow<'static, str>),
+    LexerError(u32, Cow<'static, str>),
+    InterpreterError(Cow<'static, str>),
 }
 
 impl Display for LoxError {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             LoxError::ParserError(Some(line), ref reason) => {
-                write!(f, "Error while parsing in line {}: {}", line, reason)
+                write!(f, "Parser error in line {}: {}", line, reason)
             }
             LoxError::ParserError(None, ref reason) => {
-                write!(f, "Error while parsing in last line: {}", reason)
+                write!(f, "Parser error in last line: {}", reason)
             }
             LoxError::LexerError(line, ref reason) => {
-                write!(f, "Error while scanning in line {}: {}", line, reason)
+                write!(f, "Lexer error in line {}: {}", line, reason)
             }
+            LoxError::InterpreterError(ref reason) => write!(f, "{}", reason),
         }
     }
 }

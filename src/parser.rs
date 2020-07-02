@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
                         } else {
                             Err(LoxError::ParserError(
                                 Some(token.line),
-                                format!("Expected ')' but got '{}'", &token.lexeme),
+                                format!("Expected ')' but got '{}'", &token.lexeme).into(),
                             ))
                         }
                     } else {
@@ -147,10 +147,7 @@ impl<'a> Parser<'a> {
     }
 
     fn expected_expression(line: Option<u32>) -> Result<Expr<'a>> {
-        Err(LoxError::ParserError(
-            line,
-            "Expected expression".to_string(),
-        ))
+        Err(LoxError::ParserError(line, "Expected expression".into()))
     }
 }
 

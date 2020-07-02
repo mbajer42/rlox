@@ -88,7 +88,7 @@ impl<'a> Lexer<'a> {
         }
         Err(LoxError::LexerError(
             self.line,
-            "Unterminated string".to_string(),
+            "Unterminated string".into(),
         ))
     }
 
@@ -245,7 +245,7 @@ impl<'a> Iterator for Lexer<'a> {
                 _ => {
                     return Some(Err(LoxError::LexerError(
                         self.line,
-                        format!("Unexpected character '{}'", ch),
+                        format!("Unexpected character '{}'", ch).into(),
                     )));
                 }
             };
