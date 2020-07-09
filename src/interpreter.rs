@@ -1,38 +1,47 @@
+use crate::environment::Environment;
 use crate::error::{LoxError, Result};
-use crate::lexer::TokenType;
-use crate::parser::Expr;
-use std::fmt::{Display, Formatter};
+use crate::object::Object;
+use crate::statement::{Expr, Stmt};
+use crate::token::TokenType;
 
-#[derive(Debug, PartialEq)]
-enum Object {
-    Boolean(bool),
-    Nil,
-    Number(f64),
-    String(String),
+pub struct Interpreter {
+    environment: Environment,
 }
-
-impl Display for Object {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Object::Nil => write!(f, "nil"),
-            Object::Number(num) => {
-                if num.fract() == 0.0 {
-                    write!(f, "{:.0}", num)
-                } else {
-                    write!(f, "{}", num)
-                }
-            }
-            Object::Boolean(b) => write!(f, "{}", b),
-            Object::String(s) => write!(f, "{}", s),
-        }
-    }
-}
-
-struct Interpreter {}
 
 impl Interpreter {
-    fn new() -> Self {
-        Interpreter {}
+    pub fn new() -> Self {
+        Interpreter {
+            environment: Environment::new(),
+        }
+    }
+
+    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<()> {
+        for statement in statements {
+            self.execute(statement)?;
+        }
+        Ok(())
+    }
+
+    fn execute(&mut self, stmt: Stmt) -> Result<()> {
+        match stmt {
+            Stmt::Print { expression } => {
+                println!("{}", self.evaluate(&expression)?);
+                Ok(())
+            }
+            Stmt::Expression { expression } => {
+                self.evaluate(&expression)?;
+                Ok(())
+            }
+            Stmt::Var { name, initializer } => {
+                let value = if let Some(expression) = initializer {
+                    self.evaluate(&expression)?
+                } else {
+                    Object::Nil
+                };
+                self.environment.define(name, value);
+                Ok(())
+            }
+        }
     }
 
     fn evaluate(&self, expr: &Expr) -> Result<Object> {
@@ -41,11 +50,14 @@ impl Interpreter {
             Expr::Boolean(b) => Ok(Object::Boolean(*b)),
             Expr::String(s) => Ok(Object::String(s.to_string())),
             Expr::Number(num) => Ok(Object::Number(*num)),
-            Expr::Grouping(expr) => self.evaluate(expr),
-            Expr::Unary(token_type, expr) => self.unary_expression(token_type, expr),
-            Expr::Binary(left, token_type, right) => {
-                self.binary_expression(left, token_type, right)
-            }
+            Expr::Grouping { expression } => self.evaluate(expression),
+            Expr::Unary { token_type, right } => self.unary_expression(token_type, right),
+            Expr::Binary {
+                left,
+                token_type,
+                right,
+            } => self.binary_expression(left, token_type, right),
+            Expr::Variable { name } => self.environment.get(name),
         }
     }
 
@@ -118,7 +130,7 @@ impl Interpreter {
         }
     }
 
-    fn cast_operands_to_numbers<'a>(&self, left: &Object, right: &Object) -> Result<(f64, f64)> {
+    fn cast_operands_to_numbers(&self, left: &Object, right: &Object) -> Result<(f64, f64)> {
         match (left, right) {
             (Object::Number(a), Object::Number(b)) => Ok((*a, *b)),
             _ => Err(LoxError::InterpreterError(
@@ -131,11 +143,11 @@ impl Interpreter {
         }
     }
 
-    fn cast_operands_to_strings<'a>(
+    fn cast_operands_to_strings<'b>(
         &self,
-        left: &'a Object,
-        right: &'a Object,
-    ) -> Result<(&'a String, &'a String)> {
+        left: &'b Object,
+        right: &'b Object,
+    ) -> Result<(&'b String, &'b String)> {
         match (left, right) {
             (Object::String(a), Object::String(b)) => Ok((a, b)),
             _ => Err(LoxError::InterpreterError(
@@ -157,33 +169,46 @@ impl Interpreter {
     }
 }
 
-pub fn interpret<'a>(expressions: &Vec<Expr<'a>>) {
-    let interpreter = Interpreter::new();
-    for expression in expressions {
-        let result = interpreter.evaluate(expression);
-        if result.is_ok() {
-            println!("{}", result.unwrap())
-        } else {
-            println!("{}", result.unwrap_err())
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
-    use super::{Interpreter, Object};
-    use crate::{lexer, parser};
+    use super::Interpreter;
+    use crate::lexer;
+    use crate::object::Object;
+    use crate::parser;
+    use crate::statement::Stmt;
 
     #[test]
     fn simple_mathematical_expression() {
-        let source = "(3 + 4) * (6 * 1) > 21";
+        let source = "(3 + 4) * 6;";
         let (tokens, _) = lexer::lex(source);
-        let interpreter = Interpreter::new();
-        let (expressions, _) = parser::parse(&tokens);
-        let object = interpreter
-            .evaluate(&expressions[0])
-            .expect("Should interpret without any problems");
-        assert_eq!(object, Object::Boolean(true));
+        let (statements, _) = parser::parse(&tokens);
+
+        if let Stmt::Expression { expression } = &statements[0] {
+            let interpreter = Interpreter::new();
+            let result = interpreter.evaluate(expression).unwrap();
+            assert_eq!(result, Object::Number(42.0));
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[test]
+    fn assignments() {
+        let source = r#"
+            var halfTruth = 7 * 3;
+            var answer = halfTruth * 2;
+        "#;
+        let (tokens, _) = lexer::lex(source);
+        let (statements, _) = parser::parse(&tokens);
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        let half_truth = interpreter.environment.get("halfTruth").unwrap();
+        assert_eq!(half_truth, Object::Number(21.0));
+
+        let answer = interpreter.environment.get("answer").unwrap();
+        assert_eq!(answer, Object::Number(42.0));
     }
 }

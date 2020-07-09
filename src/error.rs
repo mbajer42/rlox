@@ -6,6 +6,7 @@ pub enum LoxError {
     ParserError(Option<u32>, Cow<'static, str>),
     LexerError(u32, Cow<'static, str>),
     InterpreterError(Cow<'static, str>),
+    EnvironmentError(String),
 }
 
 impl Display for LoxError {
@@ -21,6 +22,7 @@ impl Display for LoxError {
                 write!(f, "Lexer error in line {}: {}", line, reason)
             }
             LoxError::InterpreterError(ref reason) => write!(f, "{}", reason),
+            LoxError::EnvironmentError(ref reason) => write!(f, "{}", reason),
         }
     }
 }
