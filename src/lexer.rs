@@ -145,6 +145,7 @@ impl<'a> Iterator for Lexer<'a> {
                 ';' => Ok(TokenType::Semicolon),
                 '!' => {
                     if self.matches('=') {
+                        self.source_iter.next();
                         Ok(TokenType::BangEqual)
                     } else {
                         Ok(TokenType::Bang)
@@ -152,6 +153,7 @@ impl<'a> Iterator for Lexer<'a> {
                 }
                 '=' => {
                     if self.matches('=') {
+                        self.source_iter.next();
                         Ok(TokenType::EqualEqual)
                     } else {
                         Ok(TokenType::Equal)
@@ -159,6 +161,7 @@ impl<'a> Iterator for Lexer<'a> {
                 }
                 '<' => {
                     if self.matches('=') {
+                        self.source_iter.next();
                         Ok(TokenType::LessEqual)
                     } else {
                         Ok(TokenType::Less)
@@ -166,6 +169,7 @@ impl<'a> Iterator for Lexer<'a> {
                 }
                 '>' => {
                     if self.matches('=') {
+                        self.source_iter.next();
                         Ok(TokenType::GreaterEqual)
                     } else {
                         Ok(TokenType::Greater)

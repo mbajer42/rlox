@@ -344,4 +344,26 @@ mod tests {
         let current_fib = interpreter.environment.borrow().get("current").unwrap();
         assert_eq!(current_fib, Object::Number(34.0));
     }
+
+    #[test]
+    fn for_statement() {
+        let source = r#"
+            var product = 1;
+            for (var i = 1; i <= 10; i = i + 1) {
+                product = product * i;
+            }
+        "#;
+        let (tokens, _) = lexer::lex(source);
+        let (statements, parser_errors) = parser::parse(&tokens);
+        for error in &parser_errors {
+            println!("Error: {:?}", error);
+        }
+        assert_eq!(parser_errors.len(), 0);
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        let product = interpreter.environment.borrow().get("product").unwrap();
+        assert_eq!(product, Object::Number(3628800.0));
+    }
 }

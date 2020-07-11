@@ -16,26 +16,12 @@ impl<'a> Parser<'a> {
     fn statement(&mut self) -> Result<Stmt<'a>> {
         if let Some(token) = self.token_iter.peek() {
             match &token.token_type {
-                TokenType::Print => {
-                    self.token_iter.next();
-                    self.print_statement()
-                }
-                TokenType::Var => {
-                    self.token_iter.next();
-                    self.var_declaration()
-                }
-                TokenType::LeftBrace => {
-                    self.token_iter.next();
-                    self.block()
-                }
-                TokenType::If => {
-                    self.token_iter.next();
-                    self.if_statement()
-                }
-                TokenType::While => {
-                    self.token_iter.next();
-                    self.while_statement()
-                }
+                TokenType::Print => self.print_statement(),
+                TokenType::Var => self.var_declaration(),
+                TokenType::LeftBrace => self.block(),
+                TokenType::If => self.if_statement(),
+                TokenType::While => self.while_statement(),
+                TokenType::For => self.for_statement(),
                 _ => self.expression_statement(),
             }
         } else {
@@ -44,7 +30,9 @@ impl<'a> Parser<'a> {
     }
 
     fn while_statement(&mut self) -> Result<Stmt<'a>> {
-        self.consume(TokenType::LeftParen, "Expecpt '(' after 'while'.")?;
+        self.consume(TokenType::While, "While loops begin with 'while'.")?;
+        self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
+
         let condition = self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after while condition.")?;
 
@@ -56,8 +44,63 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn for_statement(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::For, "For loops begin with 'for'.")?;
+        self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
+
+        let initializer = if self.matches(&[TokenType::Semicolon]) {
+            self.token_iter.next();
+            None
+        } else if self.matches(&[TokenType::Var]) {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expression_statement()?)
+        };
+
+        let condition = if self.matches(&[TokenType::Semicolon]) {
+            Expr::Boolean(true)
+        } else {
+            self.expression()?
+        };
+        self.consume(TokenType::Semicolon, "Expect ';' after loop condition.")?;
+
+        let increment = if self.matches(&[TokenType::RightParen]) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume(TokenType::RightParen, "Expect ')' after for clauses.")?;
+
+        let mut body = self.statement()?;
+
+        if increment.is_some() {
+            body = Stmt::Block {
+                statements: Box::new(vec![
+                    body,
+                    Stmt::Expression {
+                        expression: increment.unwrap(),
+                    },
+                ]),
+            };
+        };
+        body = Stmt::While {
+            condition,
+            body: Box::new(body),
+        };
+
+        if initializer.is_some() {
+            body = Stmt::Block {
+                statements: Box::new(vec![initializer.unwrap(), body]),
+            };
+        };
+
+        Ok(body)
+    }
+
     fn if_statement(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::If, "If statements begin with 'if'.")?;
         self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+
         let condition = self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after if condition.")?;
 
@@ -77,6 +120,7 @@ impl<'a> Parser<'a> {
     }
 
     fn block(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::LeftBrace, "Blocks begin with '{'.")?;
         let mut statements = Box::new(vec![]);
 
         while !self.matches(&[TokenType::RightBrace]) {
@@ -88,12 +132,14 @@ impl<'a> Parser<'a> {
     }
 
     fn print_statement(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::Print, "Print statements begin with 'print'.")?;
         let expression = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print { expression })
     }
 
     fn var_declaration(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::Var, "Var declarations begin with 'var'.")?;
         if let Some(token) = self.token_iter.next() {
             match token.token_type {
                 TokenType::Identifier => {
