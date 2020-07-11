@@ -24,11 +24,26 @@ impl<'a> Parser<'a> {
                     self.token_iter.next();
                     self.var_declaration()
                 }
+                TokenType::LeftBrace => {
+                    self.token_iter.next();
+                    self.block()
+                }
                 _ => self.expression_statement(),
             }
         } else {
             unreachable!()
         }
+    }
+
+    fn block(&mut self) -> Result<Stmt<'a>> {
+        let mut statements = Box::new(vec![]);
+
+        while !self.matches(&[TokenType::RightBrace]) {
+            statements.push(self.statement()?);
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after block.")?;
+
+        Ok(Stmt::Block { statements })
     }
 
     fn print_statement(&mut self) -> Result<Stmt<'a>> {
@@ -71,7 +86,29 @@ impl<'a> Parser<'a> {
     }
 
     fn expression(&mut self) -> Result<Expr<'a>> {
-        self.equality()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr<'a>> {
+        let expr = self.equality()?;
+
+        if self.matches(&[TokenType::Equal]) {
+            self.token_iter.next();
+            let value = self.assignment()?;
+
+            match expr {
+                Expr::Variable { name } => Ok(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                }),
+                _ => Err(LoxError::ParserError(
+                    None,
+                    "Invalid assignment target".into(),
+                )),
+            }
+        } else {
+            Ok(expr)
+        }
     }
 
     fn equality(&mut self) -> Result<Expr<'a>> {

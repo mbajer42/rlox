@@ -24,6 +24,10 @@ pub enum Expr<'a> {
     Variable {
         name: &'a str,
     },
+    Assign {
+        name: &'a str,
+        value: Box<Expr<'a>>,
+    },
 }
 
 #[derive(Debug)]
@@ -37,5 +41,8 @@ pub enum Stmt<'a> {
     Var {
         name: &'a str,
         initializer: Option<Expr<'a>>,
+    },
+    Block {
+        statements: Box<Vec<Stmt<'a>>>,
     },
 }

@@ -4,25 +4,28 @@ use crate::object::Object;
 use crate::statement::{Expr, Stmt};
 use crate::token::TokenType;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 pub struct Interpreter {
-    environment: Environment,
+    environment: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         Interpreter {
-            environment: Environment::new(),
+            environment: Rc::new(RefCell::new(Environment::new())),
         }
     }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<()> {
-        for statement in statements {
+        for statement in &statements {
             self.execute(statement)?;
         }
         Ok(())
     }
 
-    fn execute(&mut self, stmt: Stmt) -> Result<()> {
+    fn execute(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Print { expression } => {
                 println!("{}", self.evaluate(&expression)?);
@@ -38,13 +41,26 @@ impl Interpreter {
                 } else {
                     Object::Nil
                 };
-                self.environment.define(name, value);
+                self.environment.borrow_mut().define(name, value);
                 Ok(())
             }
+            Stmt::Block { statements } => self.execute_block(&*statements),
         }
     }
 
-    fn evaluate(&self, expr: &Expr) -> Result<Object> {
+    fn execute_block(&mut self, statements: &Vec<Stmt>) -> Result<()> {
+        let previous = self.environment.clone();
+        self.environment = Rc::new(RefCell::new(Environment::with_enclosing(previous.clone())));
+
+        for statement in statements {
+            self.execute(statement)?;
+        }
+
+        self.environment = previous;
+        Ok(())
+    }
+
+    fn evaluate(&mut self, expr: &Expr) -> Result<Object> {
         match expr {
             Expr::Nil => Ok(Object::Nil),
             Expr::Boolean(b) => Ok(Object::Boolean(*b)),
@@ -57,11 +73,16 @@ impl Interpreter {
                 token_type,
                 right,
             } => self.binary_expression(left, token_type, right),
-            Expr::Variable { name } => self.environment.get(name),
+            Expr::Variable { name } => self.environment.borrow().get(name),
+            Expr::Assign { name, value } => {
+                let value = self.evaluate(value)?;
+                self.environment.borrow_mut().assign(name, value.clone())?;
+                Ok(value)
+            }
         }
     }
 
-    fn unary_expression(&self, token_type: &TokenType, expr: &Expr) -> Result<Object> {
+    fn unary_expression(&mut self, token_type: &TokenType, expr: &Expr) -> Result<Object> {
         let right = self.evaluate(expr)?;
 
         match token_type {
@@ -77,7 +98,7 @@ impl Interpreter {
     }
 
     fn binary_expression(
-        &self,
+        &mut self,
         left: &Expr,
         token_type: &TokenType,
         right: &Expr,
@@ -185,7 +206,7 @@ mod tests {
         let (statements, _) = parser::parse(&tokens);
 
         if let Stmt::Expression { expression } = &statements[0] {
-            let interpreter = Interpreter::new();
+            let mut interpreter = Interpreter::new();
             let result = interpreter.evaluate(expression).unwrap();
             assert_eq!(result, Object::Number(42.0));
         } else {
@@ -194,10 +215,10 @@ mod tests {
     }
 
     #[test]
-    fn assignments() {
+    fn var_declaration() {
         let source = r#"
-            var halfTruth = 7 * 3;
-            var answer = halfTruth * 2;
+            var half = 7 * 3;
+            var answer = half * 2;
         "#;
         let (tokens, _) = lexer::lex(source);
         let (statements, _) = parser::parse(&tokens);
@@ -205,10 +226,37 @@ mod tests {
         let mut interpreter = Interpreter::new();
         interpreter.interpret(statements).unwrap();
 
-        let half_truth = interpreter.environment.get("halfTruth").unwrap();
+        let half_truth = interpreter.environment.borrow().get("half").unwrap();
         assert_eq!(half_truth, Object::Number(21.0));
 
-        let answer = interpreter.environment.get("answer").unwrap();
+        let answer = interpreter.environment.borrow().get("answer").unwrap();
         assert_eq!(answer, Object::Number(42.0));
+    }
+
+    #[test]
+    fn block() {
+        let source = r#"
+            var answer = 42;
+            var thirteen = 0;
+            {
+                var answer = 21;
+                thirteen = 13;
+                var lost = "lost";
+            }
+        "#;
+
+        let (tokens, _) = lexer::lex(source);
+        let (statements, _) = parser::parse(&tokens);
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        let answer = interpreter.environment.borrow().get("answer").unwrap();
+        assert_eq!(answer, Object::Number(42.0));
+
+        let thirteen = interpreter.environment.borrow().get("thirteen").unwrap();
+        assert_eq!(thirteen, Object::Number(13.0));
+
+        assert!(interpreter.environment.borrow().get("lost").is_err());
     }
 }
