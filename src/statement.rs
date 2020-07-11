@@ -20,7 +20,12 @@ pub enum Expr<'a> {
         token_type: TokenType<'a>,
         right: Box<Expr<'a>>,
     },
-    //
+    Logical {
+        left: Box<Expr<'a>>,
+        operator: TokenType<'a>,
+        right: Box<Expr<'a>>,
+    },
+    // assignments
     Variable {
         name: &'a str,
     },
@@ -44,5 +49,10 @@ pub enum Stmt<'a> {
     },
     Block {
         statements: Box<Vec<Stmt<'a>>>,
+    },
+    If {
+        condition: Expr<'a>,
+        then_branch: Box<Stmt<'a>>,
+        else_branch: Option<Box<Stmt<'a>>>,
     },
 }

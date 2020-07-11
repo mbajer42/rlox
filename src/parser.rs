@@ -28,11 +28,35 @@ impl<'a> Parser<'a> {
                     self.token_iter.next();
                     self.block()
                 }
+                TokenType::If => {
+                    self.token_iter.next();
+                    self.if_statement()
+                }
                 _ => self.expression_statement(),
             }
         } else {
             unreachable!()
         }
+    }
+
+    fn if_statement(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after if condition.")?;
+
+        let then_branch = Box::new(self.statement()?);
+        let else_branch = if self.matches(&[TokenType::Else]) {
+            self.token_iter.next();
+            Some(Box::new(self.statement()?))
+        } else {
+            None
+        };
+
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn block(&mut self) -> Result<Stmt<'a>> {
@@ -90,7 +114,7 @@ impl<'a> Parser<'a> {
     }
 
     fn assignment(&mut self) -> Result<Expr<'a>> {
-        let expr = self.equality()?;
+        let expr = self.or()?;
 
         if self.matches(&[TokenType::Equal]) {
             self.token_iter.next();
@@ -109,6 +133,38 @@ impl<'a> Parser<'a> {
         } else {
             Ok(expr)
         }
+    }
+
+    fn or(&mut self) -> Result<Expr<'a>> {
+        let mut expr = self.and()?;
+
+        while self.matches(&[TokenType::Or]) {
+            self.token_iter.next();
+            let right = self.and()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                operator: TokenType::Or,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(expr)
+    }
+
+    fn and(&mut self) -> Result<Expr<'a>> {
+        let mut expr = self.equality()?;
+
+        while self.matches(&[TokenType::And]) {
+            self.token_iter.next();
+            let right = self.equality()?;
+            expr = Expr::Logical {
+                left: Box::new(expr),
+                operator: TokenType::And,
+                right: Box::new(right),
+            };
+        }
+
+        Ok(expr)
     }
 
     fn equality(&mut self) -> Result<Expr<'a>> {
@@ -309,6 +365,7 @@ mod tests {
     use super::parse;
     use super::{Expr, Stmt};
     use crate::lexer;
+    use crate::token::TokenType;
 
     #[test]
     fn simple_mathematical_expression() {
@@ -345,6 +402,29 @@ mod tests {
                 assert_eq!(initializer.unwrap(), Expr::Number(42.0));
             }
             _ => panic!("Expected to be of type Stmt::Var"),
+        }
+    }
+
+    #[test]
+    fn or_operator() {
+        let source = "true or false;";
+        let (tokens, _) = lexer::lex(source);
+        let (statements, errors) = parse(&tokens);
+        assert_eq!(errors.len(), 0);
+        assert_eq!(statements.len(), 1);
+
+        match &statements[0] {
+            &Stmt::Expression { ref expression } => {
+                assert_eq!(
+                    expression,
+                    &Expr::Logical {
+                        left: Box::new(Expr::Boolean(true)),
+                        operator: TokenType::Or,
+                        right: Box::new(Expr::Boolean(false))
+                    }
+                );
+            }
+            _ => panic!("Expected to be of type Stmt::Expression"),
         }
     }
 }

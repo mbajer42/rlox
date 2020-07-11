@@ -45,6 +45,20 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Block { statements } => self.execute_block(&*statements),
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let condition = self.evaluate(condition)?;
+                if self.is_truthy(&condition) {
+                    self.execute(&*then_branch)
+                } else if let Some(else_branch) = else_branch {
+                    self.execute(&*else_branch)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -79,6 +93,23 @@ impl Interpreter {
                 self.environment.borrow_mut().assign(name, value.clone())?;
                 Ok(value)
             }
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
+                let left = self.evaluate(left)?;
+                if operator == &TokenType::Or {
+                    if self.is_truthy(&left) {
+                        return Ok(left);
+                    }
+                } else {
+                    if !self.is_truthy(&left) {
+                        return Ok(left);
+                    }
+                }
+                self.evaluate(right)
+            }
         }
     }
 
@@ -92,7 +123,7 @@ impl Interpreter {
                     format!("Operand must be a number, but got '{}'", right).into(),
                 )),
             },
-            TokenType::Bang => Ok(Object::Boolean(!self.is_truthy(right))),
+            TokenType::Bang => Ok(Object::Boolean(!self.is_truthy(&right))),
             _ => unreachable!(),
         }
     }
@@ -181,8 +212,8 @@ impl Interpreter {
         }
     }
 
-    fn is_truthy(&self, object: Object) -> bool {
-        match object {
+    fn is_truthy(&self, object: &Object) -> bool {
+        match *object {
             Object::Nil => false,
             Object::Boolean(b) => b,
             _ => true,
@@ -258,5 +289,30 @@ mod tests {
         assert_eq!(thirteen, Object::Number(13.0));
 
         assert!(interpreter.environment.borrow().get("lost").is_err());
+    }
+
+    #[test]
+    fn if_statement() {
+        let source = r#"
+            var truth = true;
+            var answer;
+            if (truth) {
+                answer = 42;
+            } else {
+                answer = 21;
+            }
+        "#;
+
+        let (tokens, _) = lexer::lex(source);
+        let (statements, parser_errs) = parser::parse(&tokens);
+        for err in parser_errs {
+            println!("{}", err);
+        }
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        let answer = interpreter.environment.borrow().get("answer").unwrap();
+        assert_eq!(answer, Object::Number(42.0));
     }
 }
