@@ -32,11 +32,28 @@ impl<'a> Parser<'a> {
                     self.token_iter.next();
                     self.if_statement()
                 }
+                TokenType::While => {
+                    self.token_iter.next();
+                    self.while_statement()
+                }
                 _ => self.expression_statement(),
             }
         } else {
             unreachable!()
         }
+    }
+
+    fn while_statement(&mut self) -> Result<Stmt<'a>> {
+        self.consume(TokenType::LeftParen, "Expecpt '(' after 'while'.")?;
+        let condition = self.expression()?;
+        self.consume(TokenType::RightParen, "Expect ')' after while condition.")?;
+
+        let body = self.statement()?;
+
+        Ok(Stmt::While {
+            condition,
+            body: Box::new(body),
+        })
     }
 
     fn if_statement(&mut self) -> Result<Stmt<'a>> {

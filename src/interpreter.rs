@@ -59,6 +59,14 @@ impl Interpreter {
                     Ok(())
                 }
             }
+            Stmt::While { condition, body } => {
+                let mut evaluated_condition = self.evaluate(&condition)?;
+                while self.is_truthy(&evaluated_condition) {
+                    self.execute(&*body)?;
+                    evaluated_condition = self.evaluate(&condition)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -304,15 +312,36 @@ mod tests {
         "#;
 
         let (tokens, _) = lexer::lex(source);
-        let (statements, parser_errs) = parser::parse(&tokens);
-        for err in parser_errs {
-            println!("{}", err);
-        }
+        let (statements, _) = parser::parse(&tokens);
 
         let mut interpreter = Interpreter::new();
         interpreter.interpret(statements).unwrap();
 
         let answer = interpreter.environment.borrow().get("answer").unwrap();
         assert_eq!(answer, Object::Number(42.0));
+    }
+
+    #[test]
+    fn while_statement() {
+        let source = r#"
+            var prev = 0;
+            var current = 1;
+
+            var i = 2;
+            while (i < 10) {
+                var temp = current;
+                current = current + prev;
+                prev = temp;
+                i = i + 1;
+            }
+        "#;
+        let (tokens, _) = lexer::lex(source);
+        let (statements, _) = parser::parse(&tokens);
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        let current_fib = interpreter.environment.borrow().get("current").unwrap();
+        assert_eq!(current_fib, Object::Number(34.0));
     }
 }
