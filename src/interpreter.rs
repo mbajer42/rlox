@@ -1,3 +1,4 @@
+use crate::callable::Clock;
 use crate::environment::Environment;
 use crate::error::{LoxError, Result};
 use crate::object::Object;
@@ -13,8 +14,10 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
+        let mut globals = Environment::new();
+        globals.define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
         Interpreter {
-            environment: Rc::new(RefCell::new(Environment::new())),
+            environment: Rc::new(RefCell::new(globals)),
         }
     }
 
@@ -39,7 +42,7 @@ impl Interpreter {
                 let value = if let Some(expression) = initializer {
                     self.evaluate(&expression)?
                 } else {
-                    Object::Nil
+                    Rc::new(Object::Nil)
                 };
                 self.environment.borrow_mut().define(name, value);
                 Ok(())
@@ -82,12 +85,12 @@ impl Interpreter {
         Ok(())
     }
 
-    fn evaluate(&mut self, expr: &Expr) -> Result<Object> {
+    fn evaluate(&mut self, expr: &Expr) -> Result<Rc<Object>> {
         match expr {
-            Expr::Nil => Ok(Object::Nil),
-            Expr::Boolean(b) => Ok(Object::Boolean(*b)),
-            Expr::String(s) => Ok(Object::String(s.to_string())),
-            Expr::Number(num) => Ok(Object::Number(*num)),
+            Expr::Nil => Ok(Rc::new(Object::Nil)),
+            Expr::Boolean(b) => Ok(Rc::new(Object::Boolean(*b))),
+            Expr::String(s) => Ok(Rc::new(Object::String(s.to_string()))),
+            Expr::Number(num) => Ok(Rc::new(Object::Number(*num))),
             Expr::Grouping { expression } => self.evaluate(expression),
             Expr::Unary { token_type, right } => self.unary_expression(token_type, right),
             Expr::Binary {
@@ -118,20 +121,21 @@ impl Interpreter {
                 }
                 self.evaluate(right)
             }
+            Expr::Call { callee, arguments } => self.call_expression(callee, arguments),
         }
     }
 
-    fn unary_expression(&mut self, token_type: &TokenType, expr: &Expr) -> Result<Object> {
+    fn unary_expression(&mut self, token_type: &TokenType, expr: &Expr) -> Result<Rc<Object>> {
         let right = self.evaluate(expr)?;
 
         match token_type {
-            TokenType::Minus => match right {
-                Object::Number(num) => Ok(Object::Number(-num)),
+            TokenType::Minus => match *right {
+                Object::Number(num) => Ok(Rc::new(Object::Number(-num))),
                 _ => Err(LoxError::InterpreterError(
                     format!("Operand must be a number, but got '{}'", right).into(),
                 )),
             },
-            TokenType::Bang => Ok(Object::Boolean(!self.is_truthy(&right))),
+            TokenType::Bang => Ok(Rc::new(Object::Boolean(!self.is_truthy(&right)))),
             _ => unreachable!(),
         }
     }
@@ -141,28 +145,28 @@ impl Interpreter {
         left: &Expr,
         token_type: &TokenType,
         right: &Expr,
-    ) -> Result<Object> {
+    ) -> Result<Rc<Object>> {
         let left = self.evaluate(left)?;
         let right = self.evaluate(right)?;
 
         match token_type {
             TokenType::Star => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Number(left * right))
+                Ok(Rc::new(Object::Number(left * right)))
             }
             TokenType::Minus => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Number(left - right))
+                Ok(Rc::new(Object::Number(left - right)))
             }
             TokenType::Slash => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Number(left / right))
+                Ok(Rc::new(Object::Number(left / right)))
             }
             TokenType::Plus => {
                 if let Ok((left, right)) = self.cast_operands_to_numbers(&left, &right) {
-                    Ok(Object::Number(left + right))
+                    Ok(Rc::new(Object::Number(left + right)))
                 } else if let Ok((left, right)) = self.cast_operands_to_strings(&left, &right) {
-                    Ok(Object::String(format!("{}{}", left, right)))
+                    Ok(Rc::new(Object::String(format!("{}{}", left, right))))
                 } else {
                     Err(LoxError::InterpreterError(format!(
                         "The '+' operator requires either 2 numbers or 2 strings, but got '{}' and '{}'",
@@ -172,21 +176,49 @@ impl Interpreter {
             }
             TokenType::LessEqual => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Boolean(left <= right))
+                Ok(Rc::new(Object::Boolean(left <= right)))
             }
             TokenType::Less => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Boolean(left < right))
+                Ok(Rc::new(Object::Boolean(left < right)))
             }
             TokenType::GreaterEqual => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Boolean(left >= right))
+                Ok(Rc::new(Object::Boolean(left >= right)))
             }
             TokenType::Greater => {
                 let (left, right) = self.cast_operands_to_numbers(&left, &right)?;
-                Ok(Object::Boolean(left > right))
+                Ok(Rc::new(Object::Boolean(left > right)))
             }
             _ => unreachable!(),
+        }
+    }
+
+    fn call_expression(&mut self, callee: &Expr, arguments: &Vec<Expr>) -> Result<Rc<Object>> {
+        let callee = self.evaluate(callee)?;
+
+        let arguments = arguments
+            .iter()
+            .map(|argument| self.evaluate(argument))
+            .collect::<Result<Vec<_>>>()?;
+
+        if let &Object::Callable(ref callable) = &*callee {
+            if callable.arity() != arguments.len() {
+                Err(LoxError::InterpreterError(
+                    format!(
+                        "Expected {} arguments but got {}.",
+                        callable.arity(),
+                        arguments.len()
+                    )
+                    .into(),
+                ))
+            } else {
+                Ok(Rc::new(callable.call(self, &arguments)?))
+            }
+        } else {
+            Err(LoxError::InterpreterError(
+                "Can only call functions and classes.".into(),
+            ))
         }
     }
 
@@ -238,6 +270,18 @@ mod tests {
     use crate::parser;
     use crate::statement::Stmt;
 
+    fn interpret(source: &'static str) -> Interpreter {
+        let (tokens, lexer_errors) = lexer::lex(source);
+        assert_eq!(lexer_errors.len(), 0);
+        let (statements, parser_errors) = parser::parse(&tokens);
+        assert_eq!(parser_errors.len(), 0);
+
+        let mut interpreter = Interpreter::new();
+        interpreter.interpret(statements).unwrap();
+
+        interpreter
+    }
+
     #[test]
     fn simple_mathematical_expression() {
         let source = "(3 + 4) * 6;";
@@ -247,7 +291,7 @@ mod tests {
         if let Stmt::Expression { expression } = &statements[0] {
             let mut interpreter = Interpreter::new();
             let result = interpreter.evaluate(expression).unwrap();
-            assert_eq!(result, Object::Number(42.0));
+            assert_eq!(*result, Object::Number(42.0));
         } else {
             unreachable!();
         }
@@ -259,17 +303,13 @@ mod tests {
             var half = 7 * 3;
             var answer = half * 2;
         "#;
-        let (tokens, _) = lexer::lex(source);
-        let (statements, _) = parser::parse(&tokens);
-
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(statements).unwrap();
+        let interpreter = interpret(source);
 
         let half_truth = interpreter.environment.borrow().get("half").unwrap();
-        assert_eq!(half_truth, Object::Number(21.0));
+        assert_eq!(*half_truth, Object::Number(21.0));
 
         let answer = interpreter.environment.borrow().get("answer").unwrap();
-        assert_eq!(answer, Object::Number(42.0));
+        assert_eq!(*answer, Object::Number(42.0));
     }
 
     #[test]
@@ -283,18 +323,13 @@ mod tests {
                 var lost = "lost";
             }
         "#;
-
-        let (tokens, _) = lexer::lex(source);
-        let (statements, _) = parser::parse(&tokens);
-
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(statements).unwrap();
+        let interpreter = interpret(source);
 
         let answer = interpreter.environment.borrow().get("answer").unwrap();
-        assert_eq!(answer, Object::Number(42.0));
+        assert_eq!(*answer, Object::Number(42.0));
 
         let thirteen = interpreter.environment.borrow().get("thirteen").unwrap();
-        assert_eq!(thirteen, Object::Number(13.0));
+        assert_eq!(*thirteen, Object::Number(13.0));
 
         assert!(interpreter.environment.borrow().get("lost").is_err());
     }
@@ -310,15 +345,10 @@ mod tests {
                 answer = 21;
             }
         "#;
-
-        let (tokens, _) = lexer::lex(source);
-        let (statements, _) = parser::parse(&tokens);
-
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(statements).unwrap();
+        let interpreter = interpret(source);
 
         let answer = interpreter.environment.borrow().get("answer").unwrap();
-        assert_eq!(answer, Object::Number(42.0));
+        assert_eq!(*answer, Object::Number(42.0));
     }
 
     #[test]
@@ -335,14 +365,10 @@ mod tests {
                 i = i + 1;
             }
         "#;
-        let (tokens, _) = lexer::lex(source);
-        let (statements, _) = parser::parse(&tokens);
-
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(statements).unwrap();
+        let interpreter = interpret(source);
 
         let current_fib = interpreter.environment.borrow().get("current").unwrap();
-        assert_eq!(current_fib, Object::Number(34.0));
+        assert_eq!(*current_fib, Object::Number(34.0));
     }
 
     #[test]
@@ -353,17 +379,24 @@ mod tests {
                 product = product * i;
             }
         "#;
-        let (tokens, _) = lexer::lex(source);
-        let (statements, parser_errors) = parser::parse(&tokens);
-        for error in &parser_errors {
-            println!("Error: {:?}", error);
-        }
-        assert_eq!(parser_errors.len(), 0);
-
-        let mut interpreter = Interpreter::new();
-        interpreter.interpret(statements).unwrap();
+        let interpreter = interpret(source);
 
         let product = interpreter.environment.borrow().get("product").unwrap();
-        assert_eq!(product, Object::Number(3628800.0));
+        assert_eq!(*product, Object::Number(3628800.0));
+    }
+
+    #[test]
+    fn call_clock() {
+        let source = r#"
+            var time = clock();
+        "#;
+        let interpreter = interpret(source);
+
+        let time = interpreter.environment.borrow().get("time").unwrap();
+        if let &Object::Number(time) = &*time {
+            assert!(time > 0.0);
+        } else {
+            panic!("Expected that clock() returns a number");
+        }
     }
 }

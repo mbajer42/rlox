@@ -13,6 +13,10 @@ pub enum Expr<'a> {
         token_type: TokenType<'a>,
         right: Box<Expr<'a>>,
     },
+    Call {
+        callee: Box<Expr<'a>>,
+        arguments: Box<Vec<Expr<'a>>>,
+    },
     Grouping {
         expression: Box<Expr<'a>>,
     },

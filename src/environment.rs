@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 pub struct Environment {
     enclosing: Option<Rc<RefCell<Environment>>>,
-    values: HashMap<String, Object>,
+    values: HashMap<String, Rc<Object>>,
 }
 
 impl Environment {
@@ -25,11 +25,11 @@ impl Environment {
         }
     }
 
-    pub fn define(&mut self, name: &str, value: Object) {
+    pub fn define(&mut self, name: &str, value: Rc<Object>) {
         self.values.insert(name.to_owned(), value);
     }
 
-    pub fn assign(&mut self, name: &str, value: Object) -> Result<()> {
+    pub fn assign(&mut self, name: &str, value: Rc<Object>) -> Result<()> {
         if self.values.contains_key(name) {
             self.values.insert(name.to_owned(), value);
             Ok(())
@@ -43,7 +43,7 @@ impl Environment {
         }
     }
 
-    pub fn get(&self, name: &str) -> Result<Object> {
+    pub fn get(&self, name: &str) -> Result<Rc<Object>> {
         if let Some(value) = self.values.get(name) {
             Ok(value.clone())
         } else if let Some(enclosing) = self.enclosing.as_ref() {
@@ -71,8 +71,10 @@ mod tests {
         let first = Rc::new(RefCell::new(Environment::new()));
         let second = Environment::with_enclosing(first.clone());
 
-        first.borrow_mut().define("answer", Object::Number(42.0));
+        first
+            .borrow_mut()
+            .define("answer", Rc::new(Object::Number(42.0)));
 
-        assert_eq!(second.get("answer").unwrap(), Object::Number(42.0));
+        assert_eq!(*second.get("answer").unwrap(), Object::Number(42.0));
     }
 }
