@@ -2,6 +2,8 @@ use crate::error::{LoxError, Result};
 use crate::statement::{Expr, Stmt};
 use crate::token::{Token, TokenType};
 
+use std::rc::Rc;
+
 struct Parser<'a> {
     token_iter: std::iter::Peekable<std::slice::Iter<'a, Token<'a>>>,
 }
@@ -13,7 +15,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn statement(&mut self) -> Result<Stmt<'a>> {
+    fn statement(&mut self) -> Result<Stmt> {
         if let Some(token) = self.token_iter.peek() {
             match &token.token_type {
                 TokenType::Print => self.print_statement(),
@@ -22,6 +24,8 @@ impl<'a> Parser<'a> {
                 TokenType::If => self.if_statement(),
                 TokenType::While => self.while_statement(),
                 TokenType::For => self.for_statement(),
+                TokenType::Fun => self.function(),
+                TokenType::Return => self.return_statement(),
                 _ => self.expression_statement(),
             }
         } else {
@@ -29,7 +33,51 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn while_statement(&mut self) -> Result<Stmt<'a>> {
+    fn return_statement(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::Return, "Return statements begin with 'return'")?;
+        let value = if self.matches(&[TokenType::Semicolon]) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume(TokenType::Semicolon, "Expect ';' after return value.")?;
+
+        Ok(Stmt::Return { value })
+    }
+
+    fn function(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::Fun, "Functions begin with 'fun'")?;
+
+        let name = self.identifier_name("function")?;
+        self.consume(
+            TokenType::LeftParen,
+            "Expect '(' after function name".into(),
+        )?;
+
+        let mut parameters = vec![];
+        while !self.matches(&[TokenType::RightParen]) {
+            let parameter_name = self.identifier_name("parameter")?;
+            parameters.push(parameter_name.to_string());
+            if self.matches(&[TokenType::Comma]) {
+                self.token_iter.next();
+            }
+        }
+        self.consume(TokenType::RightParen, "Expect ')' after parameters.")?;
+
+        let statements = if let Stmt::Block { statements } = self.block()? {
+            statements
+        } else {
+            return Err(LoxError::ParserError(None, "Expect function body".into()));
+        };
+
+        Ok(Stmt::Function {
+            name: name.to_string(),
+            parameters: Rc::new(parameters),
+            body: Rc::from(statements),
+        })
+    }
+
+    fn while_statement(&mut self) -> Result<Stmt> {
         self.consume(TokenType::While, "While loops begin with 'while'.")?;
         self.consume(TokenType::LeftParen, "Expect '(' after 'while'.")?;
 
@@ -44,7 +92,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn for_statement(&mut self) -> Result<Stmt<'a>> {
+    fn for_statement(&mut self) -> Result<Stmt> {
         self.consume(TokenType::For, "For loops begin with 'for'.")?;
         self.consume(TokenType::LeftParen, "Expect '(' after 'for'.")?;
 
@@ -97,7 +145,7 @@ impl<'a> Parser<'a> {
         Ok(body)
     }
 
-    fn if_statement(&mut self) -> Result<Stmt<'a>> {
+    fn if_statement(&mut self) -> Result<Stmt> {
         self.consume(TokenType::If, "If statements begin with 'if'.")?;
         self.consume(TokenType::LeftParen, "Expect '(' after 'if'.")?;
 
@@ -119,7 +167,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn block(&mut self) -> Result<Stmt<'a>> {
+    fn block(&mut self) -> Result<Stmt> {
         self.consume(TokenType::LeftBrace, "Blocks begin with '{'.")?;
         let mut statements = Box::new(vec![]);
 
@@ -131,14 +179,14 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Block { statements })
     }
 
-    fn print_statement(&mut self) -> Result<Stmt<'a>> {
+    fn print_statement(&mut self) -> Result<Stmt> {
         self.consume(TokenType::Print, "Print statements begin with 'print'.")?;
         let expression = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
         Ok(Stmt::Print { expression })
     }
 
-    fn var_declaration(&mut self) -> Result<Stmt<'a>> {
+    fn var_declaration(&mut self) -> Result<Stmt> {
         self.consume(TokenType::Var, "Var declarations begin with 'var'.")?;
         if let Some(token) = self.token_iter.next() {
             match token.token_type {
@@ -151,7 +199,10 @@ impl<'a> Parser<'a> {
                         None
                     };
                     self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
-                    Ok(Stmt::Var { name, initializer })
+                    Ok(Stmt::Var {
+                        name: name.to_string(),
+                        initializer,
+                    })
                 }
                 _ => Err(LoxError::ParserError(
                     Some(token.line),
@@ -166,17 +217,17 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expression_statement(&mut self) -> Result<Stmt<'a>> {
+    fn expression_statement(&mut self) -> Result<Stmt> {
         let expression = self.expression()?;
         self.consume(TokenType::Semicolon, "Expect ';' after expression.")?;
         Ok(Stmt::Expression { expression })
     }
 
-    fn expression(&mut self) -> Result<Expr<'a>> {
+    fn expression(&mut self) -> Result<Expr> {
         self.assignment()
     }
 
-    fn assignment(&mut self) -> Result<Expr<'a>> {
+    fn assignment(&mut self) -> Result<Expr> {
         let expr = self.or()?;
 
         if self.matches(&[TokenType::Equal]) {
@@ -198,7 +249,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn or(&mut self) -> Result<Expr<'a>> {
+    fn or(&mut self) -> Result<Expr> {
         let mut expr = self.and()?;
 
         while self.matches(&[TokenType::Or]) {
@@ -214,7 +265,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn and(&mut self) -> Result<Expr<'a>> {
+    fn and(&mut self) -> Result<Expr> {
         let mut expr = self.equality()?;
 
         while self.matches(&[TokenType::And]) {
@@ -230,7 +281,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn equality(&mut self) -> Result<Expr<'a>> {
+    fn equality(&mut self) -> Result<Expr> {
         let mut expr = self.comparison()?;
 
         while let Some(&token) = self.token_iter.peek() {
@@ -251,7 +302,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn comparison(&mut self) -> Result<Expr<'a>> {
+    fn comparison(&mut self) -> Result<Expr> {
         let mut expr = self.addition()?;
 
         while let Some(&token) = self.token_iter.peek() {
@@ -275,7 +326,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn addition(&mut self) -> Result<Expr<'a>> {
+    fn addition(&mut self) -> Result<Expr> {
         let mut expr = self.multiplication()?;
 
         while let Some(&token) = self.token_iter.peek() {
@@ -296,7 +347,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn multiplication(&mut self) -> Result<Expr<'a>> {
+    fn multiplication(&mut self) -> Result<Expr> {
         let mut expr = self.unary()?;
 
         while let Some(&token) = self.token_iter.peek() {
@@ -317,7 +368,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> Result<Expr<'a>> {
+    fn unary(&mut self) -> Result<Expr> {
         if let Some(&token) = self.token_iter.peek() {
             match &token.token_type {
                 TokenType::Bang | TokenType::Minus => {
@@ -335,7 +386,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn call(&mut self) -> Result<Expr<'a>> {
+    fn call(&mut self) -> Result<Expr> {
         let mut expr = self.primary()?;
 
         while self.matches(&[TokenType::LeftParen]) {
@@ -346,7 +397,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expr<'a>) -> Result<Expr<'a>> {
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr> {
         let mut arguments = vec![];
         if !self.matches(&[TokenType::RightParen]) {
             arguments.push(self.expression()?);
@@ -363,14 +414,14 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn primary(&mut self) -> Result<Expr<'a>> {
+    fn primary(&mut self) -> Result<Expr> {
         if let Some(token) = self.token_iter.next() {
-            match &token.token_type {
+            match token.token_type {
                 TokenType::False => Ok(Expr::Boolean(false)),
                 TokenType::True => Ok(Expr::Boolean(true)),
                 TokenType::Nil => Ok(Expr::Nil),
-                TokenType::Number(num) => Ok(Expr::Number(*num)),
-                TokenType::String(string) => Ok(Expr::String(*string)),
+                TokenType::Number(num) => Ok(Expr::Number(num)),
+                TokenType::String(ref string) => Ok(Expr::String(string.to_string())),
                 TokenType::LeftParen => {
                     let expr = self.expression()?;
                     if let Some(token) = self.token_iter.next() {
@@ -388,11 +439,32 @@ impl<'a> Parser<'a> {
                         Parser::expected_expression(None)
                     }
                 }
-                TokenType::Identifier => Ok(Expr::Variable { name: token.lexeme }),
+                TokenType::Identifier => Ok(Expr::Variable {
+                    name: token.lexeme.to_string(),
+                }),
                 _ => Parser::expected_expression(None),
             }
         } else {
             Parser::expected_expression(None)
+        }
+    }
+
+    fn identifier_name(&mut self, kind: &'static str) -> Result<&'a str> {
+        if let Some(token) = self.token_iter.next() {
+            match token.token_type {
+                TokenType::Identifier => Ok(token.lexeme),
+                _ => {
+                    return Err(LoxError::ParserError(
+                        Some(token.line),
+                        format!("Expect {} name", kind).into(),
+                    ));
+                }
+            }
+        } else {
+            return Err(LoxError::ParserError(
+                None,
+                format!("Expect {} name.", kind).into(),
+            ));
         }
     }
 
@@ -418,7 +490,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expected_expression(line: Option<u32>) -> Result<Expr<'a>> {
+    fn expected_expression(line: Option<u32>) -> Result<Expr> {
         Err(LoxError::ParserError(
             line,
             "Unexpected end of file, expected expression.".into(),
@@ -427,7 +499,7 @@ impl<'a> Parser<'a> {
 }
 
 impl<'a> Iterator for Parser<'a> {
-    type Item = Result<Stmt<'a>>;
+    type Item = Result<Stmt>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.token_iter.peek() {
@@ -441,7 +513,7 @@ impl<'a> Iterator for Parser<'a> {
     }
 }
 
-pub fn parse<'a>(tokens: &'a Vec<Token<'a>>) -> (Vec<Stmt<'a>>, Vec<LoxError>) {
+pub fn parse<'a>(tokens: &'a Vec<Token<'a>>) -> (Vec<Stmt>, Vec<LoxError>) {
     let parser = Parser::new(tokens);
     let (expressions, errors): (Vec<_>, Vec<_>) = parser.partition(Result::is_ok);
     let expressions = expressions.into_iter().map(Result::unwrap).collect();
@@ -517,5 +589,18 @@ mod tests {
             }
             _ => panic!("Expected to be of type Stmt::Expression"),
         }
+    }
+
+    #[test]
+    fn function() {
+        let source = r#"
+            fun add(a, b) {
+                print a + b;
+            }
+        "#;
+        let (tokens, _) = lexer::lex(source);
+        let (statements, errors) = parse(&tokens);
+        assert_eq!(errors.len(), 0);
+        assert_eq!(statements.len(), 1);
     }
 }

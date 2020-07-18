@@ -27,10 +27,12 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn string(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
+    fn string(&mut self, start_pos: usize) -> Result<TokenType> {
         while let Some((pos, ch)) = self.source_iter.next() {
             if ch == '"' {
-                return Ok(TokenType::String(&self.source[start_pos..pos]));
+                return Ok(TokenType::String(
+                    (&self.source[start_pos..pos]).to_string(),
+                ));
             }
         }
         Err(LoxError::LexerError(
@@ -39,7 +41,7 @@ impl<'a> Lexer<'a> {
         ))
     }
 
-    fn number(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
+    fn number(&mut self, start_pos: usize) -> Result<TokenType> {
         while self.is_digit() {
             self.source_iter.next();
         }
@@ -61,7 +63,7 @@ impl<'a> Lexer<'a> {
         Ok(TokenType::Number(number.parse().unwrap()))
     }
 
-    fn identifier(&mut self, start_pos: usize) -> Result<TokenType<'a>> {
+    fn identifier(&mut self, start_pos: usize) -> Result<TokenType> {
         while self.is_alpha() || self.is_digit() {
             self.source_iter.next();
         }
@@ -267,7 +269,7 @@ mod tests {
                 line: 1,
             },
             Token {
-                token_type: TokenType::String("In Rust!"),
+                token_type: TokenType::String("In Rust!".to_string()),
                 lexeme: r#""In Rust!""#,
                 line: 1,
             },

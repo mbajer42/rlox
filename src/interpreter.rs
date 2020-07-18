@@ -1,4 +1,4 @@
-use crate::callable::Clock;
+use crate::callable::{Clock, LoxFunction};
 use crate::environment::Environment;
 use crate::error::{LoxError, Result};
 use crate::object::Object;
@@ -10,20 +10,29 @@ use std::rc::Rc;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
+    globals: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        let mut globals = Environment::new();
-        globals.define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
+        let globals = Rc::new(RefCell::new(Environment::new()));
+        globals
+            .borrow_mut()
+            .define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
+
         Interpreter {
-            environment: Rc::new(RefCell::new(globals)),
+            environment: globals.clone(),
+            globals: globals,
         }
     }
 
+    pub fn globals(&self) -> Rc<RefCell<Environment>> {
+        self.globals.clone()
+    }
+
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<()> {
-        for statement in &statements {
-            self.execute(statement)?;
+        for statement in statements {
+            self.execute(&statement)?;
         }
         Ok(())
     }
@@ -44,10 +53,15 @@ impl Interpreter {
                 } else {
                     Rc::new(Object::Nil)
                 };
-                self.environment.borrow_mut().define(name, value);
+                self.environment.borrow_mut().define(&name, value);
                 Ok(())
             }
-            Stmt::Block { statements } => self.execute_block(&*statements),
+            Stmt::Block { statements } => self.execute_block(
+                statements,
+                Rc::new(RefCell::new(Environment::with_enclosing(
+                    self.environment.clone(),
+                ))),
+            ),
             Stmt::If {
                 condition,
                 then_branch,
@@ -55,9 +69,9 @@ impl Interpreter {
             } => {
                 let condition = self.evaluate(condition)?;
                 if self.is_truthy(&condition) {
-                    self.execute(&*then_branch)
+                    self.execute(then_branch)
                 } else if let Some(else_branch) = else_branch {
-                    self.execute(&*else_branch)
+                    self.execute(else_branch)
                 } else {
                     Ok(())
                 }
@@ -65,20 +79,48 @@ impl Interpreter {
             Stmt::While { condition, body } => {
                 let mut evaluated_condition = self.evaluate(&condition)?;
                 while self.is_truthy(&evaluated_condition) {
-                    self.execute(&*body)?;
+                    self.execute(body)?;
                     evaluated_condition = self.evaluate(&condition)?;
                 }
                 Ok(())
             }
+            Stmt::Function {
+                name,
+                parameters,
+                body,
+            } => {
+                let function = Rc::new(Object::Callable(Box::new(LoxFunction::new(
+                    name.to_string(),
+                    parameters.clone(),
+                    body.clone(),
+                ))));
+                self.environment.borrow_mut().define(&name, function);
+                Ok(())
+            }
+            Stmt::Return { value } => {
+                let value = if let Some(value) = value {
+                    self.evaluate(value)?
+                } else {
+                    Rc::new(Object::Nil)
+                };
+                Err(LoxError::Return(value))
+            }
         }
     }
 
-    fn execute_block(&mut self, statements: &Vec<Stmt>) -> Result<()> {
+    pub fn execute_block(
+        &mut self,
+        statements: &Vec<Stmt>,
+        environment: Rc<RefCell<Environment>>,
+    ) -> Result<()> {
         let previous = self.environment.clone();
-        self.environment = Rc::new(RefCell::new(Environment::with_enclosing(previous.clone())));
+        self.environment = environment;
 
         for statement in statements {
-            self.execute(statement)?;
+            self.execute(statement).map_err(|err| {
+                self.environment = previous.clone();
+                err
+            })?;
         }
 
         self.environment = previous;
@@ -213,7 +255,7 @@ impl Interpreter {
                     .into(),
                 ))
             } else {
-                Ok(Rc::new(callable.call(self, &arguments)?))
+                Ok(callable.call(self, &arguments)?)
             }
         } else {
             Err(LoxError::InterpreterError(
@@ -398,5 +440,21 @@ mod tests {
         } else {
             panic!("Expected that clock() returns a number");
         }
+    }
+
+    #[test]
+    fn functions() {
+        let source = r#"
+            fun fib(n) {
+                if (n <= 1) {
+                    return n;
+                }
+                return fib(n - 1) + fib(n - 2);
+            }
+            var fifth = fib(5);
+        "#;
+        let interpreter = interpret(source);
+        let fifth_fib = interpreter.environment.borrow().get("fifth").unwrap();
+        assert_eq!(*fifth_fib, Object::Number(5.0));
     }
 }

@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenType<'a> {
+pub enum TokenType {
     LeftParen,
     RightParen,
     LeftBrace,
@@ -22,7 +22,7 @@ pub enum TokenType<'a> {
     LessEqual,
 
     Identifier,
-    String(&'a str),
+    String(String),
     Number(f64),
 
     And,
@@ -47,7 +47,7 @@ pub enum TokenType<'a> {
 
 #[derive(Debug)]
 pub struct Token<'a> {
-    pub token_type: TokenType<'a>,
+    pub token_type: TokenType,
     pub lexeme: &'a str,
     pub line: u32,
 }

@@ -1,5 +1,8 @@
+use crate::object::Object;
+
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum LoxError {
@@ -7,6 +10,7 @@ pub enum LoxError {
     LexerError(u32, Cow<'static, str>),
     InterpreterError(Cow<'static, str>),
     EnvironmentError(String),
+    Return(Rc<Object>),
 }
 
 impl Display for LoxError {
@@ -23,6 +27,10 @@ impl Display for LoxError {
             }
             LoxError::InterpreterError(ref reason) => write!(f, "{}", reason),
             LoxError::EnvironmentError(ref reason) => write!(f, "{}", reason),
+            LoxError::Return(_value) => write!(
+                f,
+                "Forgot to handle return statement, this should not happen"
+            ),
         }
     }
 }
