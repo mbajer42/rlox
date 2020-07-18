@@ -43,17 +43,21 @@ impl std::fmt::Debug for Clock {
 }
 
 pub struct LoxFunction {
-    name: String,
     parameters: Rc<Vec<String>>,
     body: Rc<Vec<Stmt>>,
+    closure: Rc<RefCell<Environment>>,
 }
 
 impl LoxFunction {
-    pub fn new(name: String, parameters: Rc<Vec<String>>, body: Rc<Vec<Stmt>>) -> Self {
+    pub fn new(
+        parameters: Rc<Vec<String>>,
+        body: Rc<Vec<Stmt>>,
+        closure: Rc<RefCell<Environment>>,
+    ) -> Self {
         LoxFunction {
-            name,
             parameters,
             body,
+            closure,
         }
     }
 }
@@ -68,7 +72,7 @@ impl Callable for LoxFunction {
         interpreter: &mut Interpreter,
         arguments: &Vec<Rc<Object>>,
     ) -> Result<Rc<Object>> {
-        let mut environment = Environment::with_enclosing(interpreter.globals());
+        let mut environment = Environment::with_enclosing(self.closure.clone());
         self.parameters
             .iter()
             .zip(arguments.iter())

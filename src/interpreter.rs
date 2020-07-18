@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 pub struct Interpreter {
     environment: Rc<RefCell<Environment>>,
-    globals: Rc<RefCell<Environment>>,
 }
 
 impl Interpreter {
@@ -21,13 +20,8 @@ impl Interpreter {
             .define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
 
         Interpreter {
-            environment: globals.clone(),
-            globals: globals,
+            environment: globals,
         }
-    }
-
-    pub fn globals(&self) -> Rc<RefCell<Environment>> {
-        self.globals.clone()
     }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<()> {
@@ -90,9 +84,9 @@ impl Interpreter {
                 body,
             } => {
                 let function = Rc::new(Object::Callable(Box::new(LoxFunction::new(
-                    name.to_string(),
                     parameters.clone(),
                     body.clone(),
+                    self.environment.clone(),
                 ))));
                 self.environment.borrow_mut().define(&name, function);
                 Ok(())
@@ -456,5 +450,27 @@ mod tests {
         let interpreter = interpret(source);
         let fifth_fib = interpreter.environment.borrow().get("fifth").unwrap();
         assert_eq!(*fifth_fib, Object::Number(5.0));
+    }
+
+    #[test]
+    fn closure() {
+        let source = r#"
+            fun makeCounter() {
+                var i = 0;
+                fun count() {
+                    i = i + 1;
+                    return i;
+                }
+                return count;
+            }
+            var counter = makeCounter();
+            var one = counter();
+            var two = counter();
+        "#;
+        let interpreter = interpret(source);
+        let one = interpreter.environment.borrow().get("one").unwrap();
+        let two = interpreter.environment.borrow().get("two").unwrap();
+        assert_eq!(*one, Object::Number(1.0));
+        assert_eq!(*two, Object::Number(2.0));
     }
 }
