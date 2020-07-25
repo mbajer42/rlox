@@ -3,11 +3,18 @@ use crate::statement::{Expr, ExprId, Stmt};
 
 use std::collections::HashMap;
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum FunctionType {
+    None,
+    Function,
+}
+
 pub type Depth = u64;
 
 struct Resolver<'a> {
     scopes: Vec<HashMap<&'a str, bool>>,
     expr_id_to_depth: HashMap<ExprId, Depth>,
+    current_function: FunctionType,
 }
 
 impl<'a> Resolver<'a> {
@@ -15,6 +22,7 @@ impl<'a> Resolver<'a> {
         Self {
             scopes: Vec::new(),
             expr_id_to_depth: HashMap::new(),
+            current_function: FunctionType::None,
         }
     }
 
@@ -51,6 +59,8 @@ impl<'a> Resolver<'a> {
             } => {
                 self.declare(name);
                 self.define(name);
+                let enclosing_function = self.current_function;
+                self.current_function = FunctionType::Function;
                 self.begin_scope();
                 for param in parameters.as_ref() {
                     self.declare(param);
@@ -58,6 +68,7 @@ impl<'a> Resolver<'a> {
                 }
                 self.resolve_statements(body)?;
                 self.end_scope();
+                self.current_function = enclosing_function;
             }
             Stmt::Expression { expression } => {
                 self.resolve_expression(expression)?;
@@ -75,6 +86,9 @@ impl<'a> Resolver<'a> {
             }
             Stmt::Print { expression } => self.resolve_expression(expression)?,
             Stmt::Return { value } => {
+                if self.current_function == FunctionType::None {
+                    return Err(LoxError::ResolverError("Cannot return from top-level code"));
+                }
                 if let Some(value) = value {
                     self.resolve_expression(value)?;
                 }
@@ -171,4 +185,44 @@ impl<'a> Resolver<'a> {
 pub fn resolve(statements: &[Stmt]) -> Result<HashMap<ExprId, Depth>> {
     let mut resolver = Resolver::new();
     resolver.resolve(statements)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::{resolve, Depth};
+
+    use crate::error::Result;
+    use crate::lexer;
+    use crate::parser;
+    use crate::statement::ExprId;
+
+    use std::collections::HashMap;
+
+    fn scopes(source: &'static str) -> Result<HashMap<ExprId, Depth>> {
+        let (tokens, lexer_errors) = lexer::lex(source);
+        assert_eq!(lexer_errors.len(), 0);
+        let (statements, parser_errors) = parser::parse(&tokens);
+        assert_eq!(parser_errors.len(), 0);
+
+        resolve(&statements)
+    }
+
+    #[test]
+    fn invalid_return_statement() {
+        let source = "return 42;";
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_err(), true);
+    }
+
+    #[test]
+    fn valid_return_statement() {
+        let source = r#"
+            fun test() {
+                return 42;
+            }
+        "#;
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_ok(), true);
+    }
 }
