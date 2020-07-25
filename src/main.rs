@@ -5,14 +5,15 @@ mod interpreter;
 mod lexer;
 mod object;
 mod parser;
+mod resolver;
 mod statement;
 mod token;
 
-use std::io;
-use std::io::Write;
-
 use crate::error::LoxError;
 use crate::interpreter::Interpreter;
+
+use std::io;
+use std::io::Write;
 
 fn run_prompt() {
     let mut interpreter = Interpreter::new();
@@ -31,6 +32,13 @@ fn run_prompt() {
                 if !lexer_errors.is_empty() || !parser_errors.is_empty() {
                     std::process::exit(64);
                 }
+
+                let scopes = resolver::resolve(&statements);
+                if scopes.is_err() {
+                    std::process::exit(64);
+                }
+                interpreter.add_scopes(scopes.unwrap());
+
                 interpreter
                     .interpret(statements)
                     .expect("Interpreter error: ");

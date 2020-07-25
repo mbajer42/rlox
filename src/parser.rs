@@ -3,6 +3,14 @@ use crate::statement::{Expr, Stmt};
 use crate::token::{Token, TokenType};
 
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// TODO find a better solution
+static NEXT_EXPRESSION_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_id() -> u64 {
+    NEXT_EXPRESSION_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 struct Parser<'a> {
     token_iter: std::iter::Peekable<std::slice::Iter<'a, Token<'a>>>,
@@ -235,7 +243,8 @@ impl<'a> Parser<'a> {
             let value = self.assignment()?;
 
             match expr {
-                Expr::Variable { name } => Ok(Expr::Assign {
+                Expr::Variable { id: _, name } => Ok(Expr::Assign {
+                    id: next_id(),
                     name,
                     value: Box::new(value),
                 }),
@@ -440,6 +449,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokenType::Identifier => Ok(Expr::Variable {
+                    id: next_id(),
                     name: token.lexeme.to_string(),
                 }),
                 _ => Parser::expected_expression(None),

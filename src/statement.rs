@@ -2,6 +2,8 @@ use crate::token::TokenType;
 
 use std::rc::Rc;
 
+pub type ExprId = u64;
+
 #[derive(Debug, PartialEq)]
 pub enum Expr {
     // literal values
@@ -33,12 +35,28 @@ pub enum Expr {
     },
     // assignments
     Variable {
+        id: ExprId,
         name: String,
     },
     Assign {
+        id: ExprId,
         name: String,
         value: Box<Expr>,
     },
+}
+
+impl Expr {
+    pub fn id(&self) -> Option<ExprId> {
+        match self {
+            Self::Variable { id, name: _ } => Some(*id),
+            Self::Assign {
+                id,
+                name: _,
+                value: _,
+            } => Some(*id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]

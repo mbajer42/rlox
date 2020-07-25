@@ -76,7 +76,9 @@ impl Callable for LoxFunction {
         self.parameters
             .iter()
             .zip(arguments.iter())
-            .for_each(|(declaration, argument)| environment.define(declaration, argument.clone()));
+            .for_each(|(declaration, argument)| {
+                environment.define(declaration, argument.clone());
+            });
 
         let result = interpreter.execute_block(&self.body, Rc::new(RefCell::new(environment)));
         let return_value = match result {

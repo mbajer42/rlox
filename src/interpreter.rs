@@ -2,13 +2,17 @@ use crate::callable::{Clock, LoxFunction};
 use crate::environment::Environment;
 use crate::error::{LoxError, Result};
 use crate::object::Object;
-use crate::statement::{Expr, Stmt};
+use crate::resolver::Depth;
+use crate::statement::{Expr, ExprId, Stmt};
 use crate::token::TokenType;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Interpreter {
+    scopes: HashMap<ExprId, Depth>,
+    globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
 }
 
@@ -20,6 +24,8 @@ impl Interpreter {
             .define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
 
         Interpreter {
+            scopes: HashMap::new(),
+            globals: globals.clone(),
             environment: globals,
         }
     }
@@ -29,6 +35,12 @@ impl Interpreter {
             self.execute(&statement)?;
         }
         Ok(())
+    }
+
+    pub fn add_scopes(&mut self, scopes: HashMap<ExprId, Depth>) {
+        scopes.iter().for_each(|(&k, &v)| {
+            self.scopes.insert(k, v);
+        });
     }
 
     fn execute(&mut self, stmt: &Stmt) -> Result<()> {
@@ -134,10 +146,24 @@ impl Interpreter {
                 token_type,
                 right,
             } => self.binary_expression(left, token_type, right),
-            Expr::Variable { name } => self.environment.borrow().get(name),
-            Expr::Assign { name, value } => {
+            Expr::Variable { id: _, name } => {
+                let depth = self.get_locals_depth(expr);
+                if let Some(depth) = depth {
+                    self.environment.borrow().get(depth, name)
+                } else {
+                    self.globals.borrow().get(0, name)
+                }
+            }
+            Expr::Assign { id: _, name, value } => {
                 let value = self.evaluate(value)?;
-                self.environment.borrow_mut().assign(name, value.clone())?;
+                let depth = self.get_locals_depth(expr);
+                if let Some(depth) = depth {
+                    self.environment
+                        .borrow_mut()
+                        .assign(depth, name, value.clone())?;
+                } else {
+                    self.globals.borrow_mut().assign(0, name, value.clone())?;
+                }
                 Ok(value)
             }
             Expr::Logical {
@@ -295,6 +321,15 @@ impl Interpreter {
             _ => true,
         }
     }
+
+    fn get_locals_depth(&self, expression: &Expr) -> Option<u64> {
+        let id = expression.id();
+        if let Some(id) = id {
+            self.scopes.get(&id).copied()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +339,7 @@ mod tests {
     use crate::lexer;
     use crate::object::Object;
     use crate::parser;
+    use crate::resolver;
     use crate::statement::Stmt;
 
     fn interpret(source: &'static str) -> Interpreter {
@@ -312,7 +348,11 @@ mod tests {
         let (statements, parser_errors) = parser::parse(&tokens);
         assert_eq!(parser_errors.len(), 0);
 
+        let scopes = resolver::resolve(&statements);
+        assert_eq!(scopes.is_ok(), true);
+
         let mut interpreter = Interpreter::new();
+        interpreter.add_scopes(scopes.unwrap());
         interpreter.interpret(statements).unwrap();
 
         interpreter
@@ -341,10 +381,10 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let half_truth = interpreter.environment.borrow().get("half").unwrap();
+        let half_truth = interpreter.environment.borrow().get(0, "half").unwrap();
         assert_eq!(*half_truth, Object::Number(21.0));
 
-        let answer = interpreter.environment.borrow().get("answer").unwrap();
+        let answer = interpreter.environment.borrow().get(0, "answer").unwrap();
         assert_eq!(*answer, Object::Number(42.0));
     }
 
@@ -361,13 +401,13 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let answer = interpreter.environment.borrow().get("answer").unwrap();
+        let answer = interpreter.environment.borrow().get(0, "answer").unwrap();
         assert_eq!(*answer, Object::Number(42.0));
 
-        let thirteen = interpreter.environment.borrow().get("thirteen").unwrap();
+        let thirteen = interpreter.environment.borrow().get(0, "thirteen").unwrap();
         assert_eq!(*thirteen, Object::Number(13.0));
 
-        assert!(interpreter.environment.borrow().get("lost").is_err());
+        assert!(interpreter.environment.borrow().get(0, "lost").is_err());
     }
 
     #[test]
@@ -383,7 +423,7 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let answer = interpreter.environment.borrow().get("answer").unwrap();
+        let answer = interpreter.environment.borrow().get(0, "answer").unwrap();
         assert_eq!(*answer, Object::Number(42.0));
     }
 
@@ -403,7 +443,7 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let current_fib = interpreter.environment.borrow().get("current").unwrap();
+        let current_fib = interpreter.environment.borrow().get(0, "current").unwrap();
         assert_eq!(*current_fib, Object::Number(34.0));
     }
 
@@ -417,7 +457,7 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let product = interpreter.environment.borrow().get("product").unwrap();
+        let product = interpreter.environment.borrow().get(0, "product").unwrap();
         assert_eq!(*product, Object::Number(3628800.0));
     }
 
@@ -428,7 +468,7 @@ mod tests {
         "#;
         let interpreter = interpret(source);
 
-        let time = interpreter.environment.borrow().get("time").unwrap();
+        let time = interpreter.environment.borrow().get(0, "time").unwrap();
         if let &Object::Number(time) = &*time {
             assert!(time > 0.0);
         } else {
@@ -448,7 +488,7 @@ mod tests {
             var fifth = fib(5);
         "#;
         let interpreter = interpret(source);
-        let fifth_fib = interpreter.environment.borrow().get("fifth").unwrap();
+        let fifth_fib = interpreter.environment.borrow().get(0, "fifth").unwrap();
         assert_eq!(*fifth_fib, Object::Number(5.0));
     }
 
@@ -468,9 +508,26 @@ mod tests {
             var two = counter();
         "#;
         let interpreter = interpret(source);
-        let one = interpreter.environment.borrow().get("one").unwrap();
-        let two = interpreter.environment.borrow().get("two").unwrap();
+        let one = interpreter.environment.borrow().get(0, "one").unwrap();
+        let two = interpreter.environment.borrow().get(0, "two").unwrap();
         assert_eq!(*one, Object::Number(1.0));
         assert_eq!(*two, Object::Number(2.0));
+    }
+
+    #[test]
+    fn resolves() {
+        let source = r#"
+            var a = 1;
+            {
+                fun increment() {
+                    a = a + 1;
+                }
+                var a = 1;
+                increment();
+            }
+        "#;
+        let interpreter = interpret(source);
+        let a = interpreter.environment.borrow().get(0, "a").unwrap();
+        assert_eq!(*a, Object::Number(2.0));
     }
 }

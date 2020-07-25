@@ -1,5 +1,6 @@
 use crate::error::{LoxError, Result};
 use crate::object::Object;
+use crate::resolver::Depth;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -29,12 +30,22 @@ impl Environment {
         self.values.insert(name.to_owned(), value);
     }
 
-    pub fn assign(&mut self, name: &str, value: Rc<Object>) -> Result<()> {
+    pub fn assign(&mut self, depth: Depth, name: &str, value: Rc<Object>) -> Result<()> {
+        if depth == 0 {
+            self.assign_here(name, value)
+        } else {
+            self.enclosing
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .assign(depth - 1, name, value)
+        }
+    }
+
+    fn assign_here(&mut self, name: &str, value: Rc<Object>) -> Result<()> {
         if self.values.contains_key(name) {
             self.values.insert(name.to_owned(), value);
             Ok(())
-        } else if let Some(enclosing) = self.enclosing.as_ref() {
-            enclosing.borrow_mut().assign(name, value)
         } else {
             Err(LoxError::EnvironmentError(format!(
                 "Undefined variable '{}'.",
@@ -43,11 +54,21 @@ impl Environment {
         }
     }
 
-    pub fn get(&self, name: &str) -> Result<Rc<Object>> {
+    pub fn get(&self, depth: Depth, name: &str) -> Result<Rc<Object>> {
+        if depth == 0 {
+            self.get_here(name)
+        } else {
+            self.enclosing
+                .as_ref()
+                .unwrap()
+                .borrow()
+                .get(depth - 1, name)
+        }
+    }
+
+    fn get_here(&self, name: &str) -> Result<Rc<Object>> {
         if let Some(value) = self.values.get(name) {
             Ok(value.clone())
-        } else if let Some(enclosing) = self.enclosing.as_ref() {
-            enclosing.borrow().get(name)
         } else {
             Err(LoxError::EnvironmentError(format!(
                 "Undefined variable '{}'.",
@@ -75,6 +96,6 @@ mod tests {
             .borrow_mut()
             .define("answer", Rc::new(Object::Number(42.0)));
 
-        assert_eq!(*second.get("answer").unwrap(), Object::Number(42.0));
+        assert_eq!(*second.get(1, "answer").unwrap(), Object::Number(42.0));
     }
 }
