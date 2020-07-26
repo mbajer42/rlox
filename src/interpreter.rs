@@ -1,6 +1,7 @@
-use crate::callable::{Clock, LoxFunction};
+use crate::classes::{LoxClass, LoxInstance};
 use crate::environment::Environment;
 use crate::error::{LoxError, Result};
+use crate::functions::{Clock, LoxFunction};
 use crate::object::Object;
 use crate::resolver::Depth;
 use crate::statement::{Expr, ExprId, Stmt};
@@ -21,7 +22,7 @@ impl Interpreter {
         let globals = Rc::new(RefCell::new(Environment::new()));
         globals
             .borrow_mut()
-            .define("clock", Rc::new(Object::Callable(Box::new(Clock {}))));
+            .define("clock", Rc::new(Object::Function(Box::new(Clock {}))));
 
         Interpreter {
             scopes: HashMap::new(),
@@ -95,7 +96,7 @@ impl Interpreter {
                 parameters,
                 body,
             } => {
-                let function = Rc::new(Object::Callable(Box::new(LoxFunction::new(
+                let function = Rc::new(Object::Function(Box::new(LoxFunction::new(
                     parameters.clone(),
                     body.clone(),
                     self.environment.clone(),
@@ -110,6 +111,11 @@ impl Interpreter {
                     Rc::new(Object::Nil)
                 };
                 Err(LoxError::Return(value))
+            }
+            Stmt::Class { name, methods: _ } => {
+                let class = Rc::new(Object::Class(Rc::new(LoxClass::new(name.to_string()))));
+                self.environment.borrow_mut().define(name, class);
+                Ok(())
             }
         }
     }
@@ -184,6 +190,32 @@ impl Interpreter {
                 self.evaluate(right)
             }
             Expr::Call { callee, arguments } => self.call_expression(callee, arguments),
+            Expr::Get { object, name } => {
+                let object = self.evaluate(object)?;
+                if let &Object::Instance(ref instance) = object.as_ref() {
+                    instance.borrow().get(name)
+                } else {
+                    Err(LoxError::InterpreterError(
+                        "Only instances have fields.".into(),
+                    ))
+                }
+            }
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
+                let object = self.evaluate(object)?;
+                let value = self.evaluate(value)?;
+                if let &Object::Instance(ref instance) = object.as_ref() {
+                    instance.borrow_mut().set(name, value);
+                    Ok(Rc::new(Object::Nil))
+                } else {
+                    Err(LoxError::InterpreterError(
+                        "Only instances have fields.".into(),
+                    ))
+                }
+            }
         }
     }
 
@@ -264,23 +296,27 @@ impl Interpreter {
             .map(|argument| self.evaluate(argument))
             .collect::<Result<Vec<_>>>()?;
 
-        if let &Object::Callable(ref callable) = &*callee {
-            if callable.arity() != arguments.len() {
-                Err(LoxError::InterpreterError(
-                    format!(
-                        "Expected {} arguments but got {}.",
-                        callable.arity(),
-                        arguments.len()
-                    )
-                    .into(),
-                ))
-            } else {
-                Ok(callable.call(self, &arguments)?)
+        match callee.as_ref() {
+            Object::Function(function) => {
+                if function.arity() != arguments.len() {
+                    Err(LoxError::InterpreterError(
+                        format!(
+                            "Expected {} arguments but got {}.",
+                            function.arity(),
+                            arguments.len()
+                        )
+                        .into(),
+                    ))
+                } else {
+                    Ok(function.call(self, &arguments)?)
+                }
             }
-        } else {
-            Err(LoxError::InterpreterError(
+            Object::Class(class) => Ok(Rc::new(Object::Instance(Rc::new(RefCell::new(
+                LoxInstance::new(Rc::clone(class)),
+            ))))),
+            _ => Err(LoxError::InterpreterError(
                 "Can only call functions and classes.".into(),
-            ))
+            )),
         }
     }
 
@@ -529,5 +565,18 @@ mod tests {
         let interpreter = interpret(source);
         let a = interpreter.environment.borrow().get(0, "a").unwrap();
         assert_eq!(*a, Object::Number(2.0));
+    }
+
+    #[test]
+    fn get_set_fields() {
+        let source = r#"
+            class Foo {}
+            var foo = Foo();
+            foo.field = "some value";
+            var field = foo.field;
+        "#;
+        let interpreter = interpret(source);
+        let field = interpreter.environment.borrow().get(0, "field").unwrap();
+        assert_eq!(*field, Object::String("some value".to_owned()));
     }
 }

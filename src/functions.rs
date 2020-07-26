@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub trait Callable {
+pub trait Function {
     fn arity(&self) -> usize;
     fn call(
         &self,
@@ -17,7 +17,7 @@ pub trait Callable {
     ) -> Result<Rc<Object>>;
 }
 
-impl std::fmt::Debug for dyn Callable {
+impl std::fmt::Debug for dyn Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<lox fn>")
     }
@@ -25,7 +25,7 @@ impl std::fmt::Debug for dyn Callable {
 
 pub struct Clock;
 
-impl Callable for Clock {
+impl Function for Clock {
     fn arity(&self) -> usize {
         0
     }
@@ -62,7 +62,7 @@ impl LoxFunction {
     }
 }
 
-impl Callable for LoxFunction {
+impl Function for LoxFunction {
     fn arity(&self) -> usize {
         self.parameters.len()
     }

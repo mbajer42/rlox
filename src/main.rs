@@ -1,6 +1,7 @@
-mod callable;
+mod classes;
 mod environment;
 mod error;
+mod functions;
 mod interpreter;
 mod lexer;
 mod object;

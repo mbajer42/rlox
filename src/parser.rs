@@ -33,12 +33,30 @@ impl<'a> Parser<'a> {
                 TokenType::While => self.while_statement(),
                 TokenType::For => self.for_statement(),
                 TokenType::Fun => self.function(),
+                TokenType::Class => self.class(),
                 TokenType::Return => self.return_statement(),
                 _ => self.expression_statement(),
             }
         } else {
             unreachable!()
         }
+    }
+
+    fn class(&mut self) -> Result<Stmt> {
+        self.consume(TokenType::Class, "Classes begin with 'class'")?;
+        let name = self.identifier_name("class")?;
+        self.consume(TokenType::LeftBrace, "Expect '{' before class body".into())?;
+
+        let mut methods = vec![];
+        while !self.matches(&[TokenType::RightBrace]) {
+            methods.push(self.function()?);
+        }
+        self.consume(TokenType::RightBrace, "Expect '}' after class body".into())?;
+
+        Ok(Stmt::Class {
+            name: name.to_string(),
+            methods: Box::new(methods),
+        })
     }
 
     fn return_statement(&mut self) -> Result<Stmt> {
@@ -248,6 +266,11 @@ impl<'a> Parser<'a> {
                     name,
                     value: Box::new(value),
                 }),
+                Expr::Get { object, name } => Ok(Expr::Set {
+                    object,
+                    name,
+                    value: Rc::new(value),
+                }),
                 _ => Err(LoxError::ParserError(
                     None,
                     "Invalid assignment target".into(),
@@ -398,9 +421,38 @@ impl<'a> Parser<'a> {
     fn call(&mut self) -> Result<Expr> {
         let mut expr = self.primary()?;
 
-        while self.matches(&[TokenType::LeftParen]) {
-            self.token_iter.next();
-            expr = self.finish_call(expr)?;
+        loop {
+            if self.matches(&[TokenType::LeftParen]) {
+                self.token_iter.next();
+                expr = self.finish_call(expr)?;
+            } else if self.matches(&[TokenType::Dot]) {
+                self.token_iter.next();
+
+                let token = self.token_iter.next();
+                if let Some(token) = token {
+                    match &token.token_type {
+                        TokenType::Identifier => {
+                            expr = Expr::Get {
+                                object: Box::new(expr),
+                                name: token.lexeme.to_string(),
+                            };
+                        }
+                        _ => {
+                            return Err(LoxError::ParserError(
+                                Some(token.line),
+                                "Expect property name after '.'.".into(),
+                            ))
+                        }
+                    }
+                } else {
+                    return Err(LoxError::ParserError(
+                        None,
+                        "Expect property name after '.'.".into(),
+                    ));
+                }
+            } else {
+                break;
+            }
         }
 
         Ok(expr)

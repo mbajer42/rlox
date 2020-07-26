@@ -97,6 +97,10 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(condition)?;
                 self.resolve_statement(body)?;
             }
+            Stmt::Class { name, methods: _ } => {
+                self.declare(name);
+                self.define(name);
+            }
         };
         Ok(())
     }
@@ -130,6 +134,17 @@ impl<'a> Resolver<'a> {
                 for arg in arguments.as_ref() {
                     self.resolve_expression(arg)?;
                 }
+            }
+            Expr::Get { object, name: _ } => {
+                self.resolve_expression(object)?;
+            }
+            Expr::Set {
+                object,
+                name: _,
+                value,
+            } => {
+                self.resolve_expression(object)?;
+                self.resolve_expression(value)?;
             }
             Expr::Grouping { expression } => {
                 self.resolve_expression(expression)?;

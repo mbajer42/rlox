@@ -1,6 +1,9 @@
-use crate::callable::Callable;
+use crate::classes::{LoxClass, LoxInstance};
+use crate::functions::Function;
 
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum Object {
@@ -8,7 +11,9 @@ pub enum Object {
     Nil,
     Number(f64),
     String(String),
-    Callable(Box<dyn Callable>),
+    Function(Box<dyn Function>),
+    Class(Rc<LoxClass>),
+    Instance(Rc<RefCell<LoxInstance>>),
 }
 
 impl Display for Object {
@@ -24,7 +29,9 @@ impl Display for Object {
             }
             Object::Boolean(b) => write!(f, "{}", b),
             Object::String(s) => write!(f, "{}", s),
-            Object::Callable(func) => write!(f, "{:?}", func),
+            Object::Function(func) => write!(f, "{:?}", func),
+            Object::Class(class) => write!(f, "{}", class),
+            Object::Instance(instance) => write!(f, "{}", instance.borrow()),
         }
     }
 }
@@ -36,7 +43,6 @@ impl PartialEq for Object {
             (Object::Nil, Object::Nil) => true,
             (Object::Number(a), Object::Number(b)) => a == b,
             (Object::String(a), Object::String(b)) => a == b,
-            (Object::Callable(_), Object::Callable(_)) => false,
             _ => false,
         }
     }

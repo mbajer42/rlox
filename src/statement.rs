@@ -21,6 +21,15 @@ pub enum Expr {
         callee: Box<Expr>,
         arguments: Box<Vec<Expr>>,
     },
+    Get {
+        object: Box<Expr>,
+        name: String,
+    },
+    Set {
+        object: Box<Expr>,
+        name: String,
+        value: Rc<Expr>,
+    },
     Grouping {
         expression: Box<Expr>,
     },
@@ -90,5 +99,9 @@ pub enum Stmt {
     },
     Return {
         value: Option<Expr>,
+    },
+    Class {
+        name: String,
+        methods: Box<Vec<Stmt>>,
     },
 }
