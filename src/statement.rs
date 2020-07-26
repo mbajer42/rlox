@@ -58,21 +58,6 @@ pub enum Expr {
     },
 }
 
-impl Expr {
-    pub fn id(&self) -> Option<ExprId> {
-        match self {
-            Self::Variable { id, name: _ } => Some(*id),
-            Self::Assign {
-                id,
-                name: _,
-                value: _,
-            } => Some(*id),
-            Self::This { id, keyword: _ } => Some(*id),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum Stmt {
     Expression {

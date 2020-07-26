@@ -177,25 +177,25 @@ impl Interpreter {
                 token_type,
                 right,
             } => self.binary_expression(left, token_type, right),
-            Expr::Variable { id: _, name } => {
-                let depth = self.get_locals_depth(expr);
+            Expr::Variable { id, name } => {
+                let depth = self.get_locals_depth(id);
                 if let Some(depth) = depth {
                     self.environment.borrow().get(depth, name)
                 } else {
                     self.globals.borrow().get(0, name)
                 }
             }
-            Expr::This { id: _, keyword } => {
-                let depth = self.get_locals_depth(expr);
+            Expr::This { id, keyword } => {
+                let depth = self.get_locals_depth(id);
                 if let Some(depth) = depth {
                     self.environment.borrow().get(depth, keyword)
                 } else {
                     self.globals.borrow().get(0, keyword)
                 }
             }
-            Expr::Assign { id: _, name, value } => {
+            Expr::Assign { id, name, value } => {
                 let value = self.evaluate(value)?;
-                let depth = self.get_locals_depth(expr);
+                let depth = self.get_locals_depth(id);
                 if let Some(depth) = depth {
                     self.environment
                         .borrow_mut()
@@ -381,13 +381,8 @@ impl Interpreter {
         }
     }
 
-    fn get_locals_depth(&self, expression: &Expr) -> Option<u64> {
-        let id = expression.id();
-        if let Some(id) = id {
-            self.scopes.get(&id).copied()
-        } else {
-            None
-        }
+    fn get_locals_depth(&self, expression_id: &ExprId) -> Option<u64> {
+        self.scopes.get(expression_id).copied()
     }
 }
 
