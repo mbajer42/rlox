@@ -504,6 +504,10 @@ impl<'a> Parser<'a> {
                     id: next_id(),
                     name: token.lexeme.to_string(),
                 }),
+                TokenType::This => Ok(Expr::This {
+                    id: next_id(),
+                    keyword: token.lexeme.to_string(),
+                }),
                 _ => Parser::expected_expression(None),
             }
         } else {

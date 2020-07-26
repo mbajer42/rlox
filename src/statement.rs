@@ -30,6 +30,10 @@ pub enum Expr {
         name: String,
         value: Rc<Expr>,
     },
+    This {
+        id: ExprId,
+        keyword: String,
+    },
     Grouping {
         expression: Box<Expr>,
     },
@@ -63,6 +67,7 @@ impl Expr {
                 name: _,
                 value: _,
             } => Some(*id),
+            Self::This { id, keyword: _ } => Some(*id),
             _ => None,
         }
     }

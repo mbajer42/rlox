@@ -5,6 +5,7 @@ use crate::object::Object;
 use crate::statement::Stmt;
 
 use std::cell::RefCell;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -46,6 +47,7 @@ pub struct LoxFunction {
     parameters: Rc<Vec<String>>,
     body: Rc<Vec<Stmt>>,
     closure: Rc<RefCell<Environment>>,
+    is_initializer: bool,
 }
 
 impl LoxFunction {
@@ -53,12 +55,35 @@ impl LoxFunction {
         parameters: Rc<Vec<String>>,
         body: Rc<Vec<Stmt>>,
         closure: Rc<RefCell<Environment>>,
+        is_initializer: bool,
     ) -> Self {
         LoxFunction {
             parameters,
             body,
             closure,
+            is_initializer,
         }
+    }
+
+    pub fn bind(&self, instance: Rc<Object>) -> Self {
+        let mut environment = Environment::with_enclosing(self.closure.clone());
+        environment.define("this", instance);
+        Self {
+            parameters: self.parameters.clone(),
+            body: self.body.clone(),
+            closure: Rc::new(RefCell::new(environment)),
+            is_initializer: self.is_initializer,
+        }
+    }
+}
+
+impl Debug for LoxFunction {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "LoxFunction {{ parameters: {:?}, body: {:?} }}",
+            self.parameters, self.body
+        )
     }
 }
 
@@ -72,6 +97,16 @@ impl Function for LoxFunction {
         interpreter: &mut Interpreter,
         arguments: &Vec<Rc<Object>>,
     ) -> Result<Rc<Object>> {
+        if self.arity() != arguments.len() {
+            return Err(LoxError::InterpreterError(
+                format!(
+                    "Expected {} arguments but got {}.",
+                    self.arity(),
+                    arguments.len()
+                )
+                .into(),
+            ));
+        };
         let mut environment = Environment::with_enclosing(self.closure.clone());
         self.parameters
             .iter()
@@ -82,8 +117,20 @@ impl Function for LoxFunction {
 
         let result = interpreter.execute_block(&self.body, Rc::new(RefCell::new(environment)));
         let return_value = match result {
-            Ok(()) => Rc::new(Object::Nil),
-            Err(LoxError::Return(value)) => value,
+            Ok(()) => {
+                if self.is_initializer {
+                    self.closure.borrow().get(0, "this")?
+                } else {
+                    Rc::new(Object::Nil)
+                }
+            }
+            Err(LoxError::Return(value)) => {
+                if self.is_initializer {
+                    self.closure.borrow().get(0, "this")?
+                } else {
+                    value
+                }
+            }
             Err(err) => return Err(err),
         };
 

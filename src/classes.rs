@@ -1,4 +1,5 @@
 use crate::error::{LoxError, Result};
+use crate::functions::LoxFunction;
 use crate::object::Object;
 
 use std::collections::HashMap;
@@ -8,11 +9,20 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub struct LoxClass {
     name: String,
+    methods: HashMap<String, Rc<LoxFunction>>,
 }
 
 impl LoxClass {
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new(name: String, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
+        Self { name, methods }
+    }
+
+    pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
+        if let Some(method) = self.methods.get(name) {
+            Some(Rc::clone(method))
+        } else {
+            None
+        }
     }
 }
 
@@ -36,12 +46,22 @@ impl LoxInstance {
         }
     }
 
-    pub fn get(&self, name: &str) -> Result<Rc<Object>> {
-        if let Some(value) = self.fields.get(name) {
-            Ok(Rc::clone(value))
+    pub fn get(wrapping_object: Rc<Object>, name: &str) -> Result<Rc<Object>> {
+        if let Object::Instance(instance) = wrapping_object.clone().as_ref() {
+            if let Some(value) = instance.borrow().fields.get(name) {
+                Ok(Rc::clone(value))
+            } else if let Some(method) = instance.borrow().class.as_ref().find_method(name) {
+                Ok(Rc::new(Object::Function(Rc::new(
+                    method.bind(wrapping_object),
+                ))))
+            } else {
+                Err(LoxError::InterpreterError(
+                    format!("Undefined property {}.", name).into(),
+                ))
+            }
         } else {
             Err(LoxError::InterpreterError(
-                format!("Undefined property {}.", name).into(),
+                "Only instances have fields.".into(),
             ))
         }
     }

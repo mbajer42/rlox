@@ -1,7 +1,7 @@
 use crate::classes::{LoxClass, LoxInstance};
 use crate::environment::Environment;
 use crate::error::{LoxError, Result};
-use crate::functions::{Clock, LoxFunction};
+use crate::functions::{Clock, Function, LoxFunction};
 use crate::object::Object;
 use crate::resolver::Depth;
 use crate::statement::{Expr, ExprId, Stmt};
@@ -22,7 +22,7 @@ impl Interpreter {
         let globals = Rc::new(RefCell::new(Environment::new()));
         globals
             .borrow_mut()
-            .define("clock", Rc::new(Object::Function(Box::new(Clock {}))));
+            .define("clock", Rc::new(Object::Function(Rc::new(Clock {}))));
 
         Interpreter {
             scopes: HashMap::new(),
@@ -96,10 +96,11 @@ impl Interpreter {
                 parameters,
                 body,
             } => {
-                let function = Rc::new(Object::Function(Box::new(LoxFunction::new(
+                let function = Rc::new(Object::Function(Rc::new(LoxFunction::new(
                     parameters.clone(),
                     body.clone(),
                     self.environment.clone(),
+                    false,
                 ))));
                 self.environment.borrow_mut().define(&name, function);
                 Ok(())
@@ -112,8 +113,32 @@ impl Interpreter {
                 };
                 Err(LoxError::Return(value))
             }
-            Stmt::Class { name, methods: _ } => {
-                let class = Rc::new(Object::Class(Rc::new(LoxClass::new(name.to_string()))));
+            Stmt::Class { name, methods } => {
+                let mut name_to_method = HashMap::new();
+                for method in methods.as_ref() {
+                    if let Stmt::Function {
+                        name,
+                        parameters,
+                        body,
+                    } = method
+                    {
+                        name_to_method.insert(
+                            name.to_string(),
+                            Rc::new(LoxFunction::new(
+                                parameters.clone(),
+                                body.clone(),
+                                self.environment.clone(),
+                                name == "init",
+                            )),
+                        );
+                    } else {
+                        unreachable!()
+                    }
+                }
+                let class = Rc::new(Object::Class(Rc::new(LoxClass::new(
+                    name.to_string(),
+                    name_to_method,
+                ))));
                 self.environment.borrow_mut().define(name, class);
                 Ok(())
             }
@@ -160,6 +185,14 @@ impl Interpreter {
                     self.globals.borrow().get(0, name)
                 }
             }
+            Expr::This { id: _, keyword } => {
+                let depth = self.get_locals_depth(expr);
+                if let Some(depth) = depth {
+                    self.environment.borrow().get(depth, keyword)
+                } else {
+                    self.globals.borrow().get(0, keyword)
+                }
+            }
             Expr::Assign { id: _, name, value } => {
                 let value = self.evaluate(value)?;
                 let depth = self.get_locals_depth(expr);
@@ -192,13 +225,7 @@ impl Interpreter {
             Expr::Call { callee, arguments } => self.call_expression(callee, arguments),
             Expr::Get { object, name } => {
                 let object = self.evaluate(object)?;
-                if let &Object::Instance(ref instance) = object.as_ref() {
-                    instance.borrow().get(name)
-                } else {
-                    Err(LoxError::InterpreterError(
-                        "Only instances have fields.".into(),
-                    ))
-                }
+                LoxInstance::get(object, name)
             }
             Expr::Set {
                 object,
@@ -297,23 +324,19 @@ impl Interpreter {
             .collect::<Result<Vec<_>>>()?;
 
         match callee.as_ref() {
-            Object::Function(function) => {
-                if function.arity() != arguments.len() {
-                    Err(LoxError::InterpreterError(
-                        format!(
-                            "Expected {} arguments but got {}.",
-                            function.arity(),
-                            arguments.len()
-                        )
-                        .into(),
-                    ))
-                } else {
-                    Ok(function.call(self, &arguments)?)
+            Object::Function(function) => Ok(function.call(self, &arguments)?),
+            Object::Class(class) => {
+                let instance = Rc::new(Object::Instance(Rc::new(RefCell::new(LoxInstance::new(
+                    Rc::clone(class),
+                )))));
+                let constructor = class.find_method("init");
+                if let Some(constructor) = constructor {
+                    constructor
+                        .bind(Rc::clone(&instance))
+                        .call(self, &arguments)?;
                 }
+                Ok(instance)
             }
-            Object::Class(class) => Ok(Rc::new(Object::Instance(Rc::new(RefCell::new(
-                LoxInstance::new(Rc::clone(class)),
-            ))))),
             _ => Err(LoxError::InterpreterError(
                 "Can only call functions and classes.".into(),
             )),
@@ -578,5 +601,25 @@ mod tests {
         let interpreter = interpret(source);
         let field = interpreter.environment.borrow().get(0, "field").unwrap();
         assert_eq!(*field, Object::String("some value".to_owned()));
+    }
+
+    #[test]
+    fn method_calls() {
+        let source = r#"
+            class Person {
+                fun init(name) {
+                    this.name = name;
+                }
+
+                fun hi() {
+                    return "Hi, my name is " + this.name;
+                }
+            }
+            var alice = Person("Alice");
+            var hiAlice = alice.hi();
+        "#;
+        let interpreter = interpret(source);
+        let hi = interpreter.environment.borrow().get(0, "hiAlice").unwrap();
+        assert_eq!(*hi, Object::String("Hi, my name is Alice".to_owned()));
     }
 }

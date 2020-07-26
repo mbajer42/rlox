@@ -11,7 +11,7 @@ pub enum Object {
     Nil,
     Number(f64),
     String(String),
-    Function(Box<dyn Function>),
+    Function(Rc<dyn Function>),
     Class(Rc<LoxClass>),
     Instance(Rc<RefCell<LoxInstance>>),
 }

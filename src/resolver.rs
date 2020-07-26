@@ -6,7 +6,15 @@ use std::collections::HashMap;
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum FunctionType {
     None,
+    Method,
     Function,
+    Initializer,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 pub type Depth = u64;
@@ -15,6 +23,7 @@ struct Resolver<'a> {
     scopes: Vec<HashMap<&'a str, bool>>,
     expr_id_to_depth: HashMap<ExprId, Depth>,
     current_function: FunctionType,
+    current_class: ClassType,
 }
 
 impl<'a> Resolver<'a> {
@@ -23,6 +32,7 @@ impl<'a> Resolver<'a> {
             scopes: Vec::new(),
             expr_id_to_depth: HashMap::new(),
             current_function: FunctionType::None,
+            current_class: ClassType::None,
         }
     }
 
@@ -57,18 +67,7 @@ impl<'a> Resolver<'a> {
                 parameters,
                 body,
             } => {
-                self.declare(name);
-                self.define(name);
-                let enclosing_function = self.current_function;
-                self.current_function = FunctionType::Function;
-                self.begin_scope();
-                for param in parameters.as_ref() {
-                    self.declare(param);
-                    self.define(param);
-                }
-                self.resolve_statements(body)?;
-                self.end_scope();
-                self.current_function = enclosing_function;
+                self.resolve_function(name, parameters, body, FunctionType::Function)?;
             }
             Stmt::Expression { expression } => {
                 self.resolve_expression(expression)?;
@@ -87,9 +86,16 @@ impl<'a> Resolver<'a> {
             Stmt::Print { expression } => self.resolve_expression(expression)?,
             Stmt::Return { value } => {
                 if self.current_function == FunctionType::None {
-                    return Err(LoxError::ResolverError("Cannot return from top-level code"));
+                    return Err(LoxError::ResolverError(
+                        "Cannot return from top-level code.",
+                    ));
                 }
                 if let Some(value) = value {
+                    if self.current_function == FunctionType::Initializer {
+                        return Err(LoxError::ResolverError(
+                            "Cannot return a value from an initializer.",
+                        ));
+                    }
                     self.resolve_expression(value)?;
                 }
             }
@@ -97,11 +103,60 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(condition)?;
                 self.resolve_statement(body)?;
             }
-            Stmt::Class { name, methods: _ } => {
+            Stmt::Class { name, methods } => {
+                let enclosing_class = self.current_class;
+                self.current_class = ClassType::Class;
                 self.declare(name);
                 self.define(name);
+                self.begin_scope();
+                self.scopes
+                    .last_mut()
+                    .map(|scope| scope.insert("this", true));
+
+                for method in methods.as_ref() {
+                    if let Stmt::Function {
+                        name,
+                        parameters,
+                        body,
+                    } = method
+                    {
+                        let function_type = if name == "init" {
+                            FunctionType::Initializer
+                        } else {
+                            FunctionType::Method
+                        };
+                        self.resolve_function(name, parameters, body, function_type)?;
+                    } else {
+                        unreachable!()
+                    }
+                }
+
+                self.end_scope();
+                self.current_class = enclosing_class;
             }
         };
+        Ok(())
+    }
+
+    fn resolve_function(
+        &mut self,
+        name: &'a str,
+        parameters: &'a Vec<String>,
+        body: &'a [Stmt],
+        function_type: FunctionType,
+    ) -> Result<()> {
+        self.declare(name);
+        self.define(name);
+        let enclosing_function = self.current_function;
+        self.current_function = function_type;
+        self.begin_scope();
+        for param in parameters {
+            self.declare(&param);
+            self.define(&param);
+        }
+        self.resolve_statements(body)?;
+        self.end_scope();
+        self.current_function = enclosing_function;
         Ok(())
     }
 
@@ -116,6 +171,14 @@ impl<'a> Resolver<'a> {
                     }
                     self.resolve_local(*id, name);
                 }
+            }
+            Expr::This { id, keyword } => {
+                if self.current_class == ClassType::None {
+                    return Err(LoxError::ResolverError(
+                        "Cannot use 'this' outside of a class.",
+                    ));
+                }
+                self.resolve_local(*id, keyword);
             }
             Expr::Assign { id, value, name } => {
                 self.resolve_expression(value)?;
@@ -207,7 +270,7 @@ mod tests {
 
     use super::{resolve, Depth};
 
-    use crate::error::Result;
+    use crate::error::{LoxError, Result};
     use crate::lexer;
     use crate::parser;
     use crate::statement::ExprId;
@@ -228,6 +291,10 @@ mod tests {
         let source = "return 42;";
         let scopes = scopes(source);
         assert_eq!(scopes.is_err(), true);
+        assert_eq!(
+            scopes.unwrap_err(),
+            LoxError::ResolverError("Cannot return from top-level code.")
+        );
     }
 
     #[test]
@@ -239,5 +306,33 @@ mod tests {
         "#;
         let scopes = scopes(source);
         assert_eq!(scopes.is_ok(), true);
+    }
+
+    #[test]
+    fn invalid_this() {
+        let source = "var a = this;";
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_err(), true);
+        assert_eq!(
+            scopes.unwrap_err(),
+            LoxError::ResolverError("Cannot use 'this' outside of a class.")
+        );
+    }
+
+    #[test]
+    fn cannot_return_from_initializer() {
+        let source = r#"
+            class Foo {
+                fun init() {
+                    return "invalid";
+                }
+            }
+        "#;
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_err(), true);
+        assert_eq!(
+            scopes.unwrap_err(),
+            LoxError::ResolverError("Cannot return a value from an initializer.")
+        );
     }
 }

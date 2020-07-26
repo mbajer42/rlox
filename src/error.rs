@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum LoxError {
     ParserError(Option<u32>, Cow<'static, str>),
     LexerError(u32, Cow<'static, str>),
