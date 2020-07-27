@@ -9,17 +9,28 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub struct LoxClass {
     name: String,
+    superclass: Option<Rc<LoxClass>>,
     methods: HashMap<String, Rc<LoxFunction>>,
 }
 
 impl LoxClass {
-    pub fn new(name: String, methods: HashMap<String, Rc<LoxFunction>>) -> Self {
-        Self { name, methods }
+    pub fn new(
+        name: String,
+        superclass: Option<Rc<LoxClass>>,
+        methods: HashMap<String, Rc<LoxFunction>>,
+    ) -> Self {
+        Self {
+            name,
+            superclass,
+            methods,
+        }
     }
 
     pub fn find_method(&self, name: &str) -> Option<Rc<LoxFunction>> {
         if let Some(method) = self.methods.get(name) {
             Some(Rc::clone(method))
+        } else if let Some(superclass) = &self.superclass {
+            superclass.find_method(name)
         } else {
             None
         }

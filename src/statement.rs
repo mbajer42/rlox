@@ -30,9 +30,14 @@ pub enum Expr {
         name: String,
         value: Rc<Expr>,
     },
+    Super {
+        id: ExprId,
+        keyword: &'static str,
+        method: String,
+    },
     This {
         id: ExprId,
-        keyword: String,
+        keyword: &'static str,
     },
     Grouping {
         expression: Box<Expr>,
@@ -92,6 +97,7 @@ pub enum Stmt {
     },
     Class {
         name: String,
+        superclass: Option<Box<Expr>>,
         methods: Box<Vec<Stmt>>,
     },
 }

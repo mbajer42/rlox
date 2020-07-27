@@ -32,7 +32,10 @@ impl<'a> Parser<'a> {
                 TokenType::If => self.if_statement(),
                 TokenType::While => self.while_statement(),
                 TokenType::For => self.for_statement(),
-                TokenType::Fun => self.function(),
+                TokenType::Fun => {
+                    self.token_iter.next();
+                    self.function()
+                }
                 TokenType::Class => self.class(),
                 TokenType::Return => self.return_statement(),
                 _ => self.expression_statement(),
@@ -45,6 +48,18 @@ impl<'a> Parser<'a> {
     fn class(&mut self) -> Result<Stmt> {
         self.consume(TokenType::Class, "Classes begin with 'class'")?;
         let name = self.identifier_name("class")?;
+
+        let superclass = if self.matches(&[TokenType::Less]) {
+            self.token_iter.next();
+            let superclass_identifier = self.identifier_name("class")?;
+            Some(Box::new(Expr::Variable {
+                id: next_id(),
+                name: superclass_identifier.to_string(),
+            }))
+        } else {
+            None
+        };
+
         self.consume(TokenType::LeftBrace, "Expect '{' before class body".into())?;
 
         let mut methods = vec![];
@@ -55,6 +70,7 @@ impl<'a> Parser<'a> {
 
         Ok(Stmt::Class {
             name: name.to_string(),
+            superclass,
             methods: Box::new(methods),
         })
     }
@@ -72,8 +88,6 @@ impl<'a> Parser<'a> {
     }
 
     fn function(&mut self) -> Result<Stmt> {
-        self.consume(TokenType::Fun, "Functions begin with 'fun'")?;
-
         let name = self.identifier_name("function")?;
         self.consume(
             TokenType::LeftParen,
@@ -504,9 +518,33 @@ impl<'a> Parser<'a> {
                     id: next_id(),
                     name: token.lexeme.to_string(),
                 }),
+                TokenType::Super => {
+                    self.consume(TokenType::Dot, "Expect '.' after super.")?;
+                    let token = self.token_iter.next();
+                    let method = if let Some(token) = token {
+                        if token.token_type != TokenType::Identifier {
+                            return Err(LoxError::ParserError(
+                                None,
+                                "Expect superclass method name.".into(),
+                            ));
+                        } else {
+                            token.lexeme
+                        }
+                    } else {
+                        return Err(LoxError::ParserError(
+                            None,
+                            "Expect superclass method name.".into(),
+                        ));
+                    };
+                    Ok(Expr::Super {
+                        id: next_id(),
+                        keyword: "super",
+                        method: method.to_string(),
+                    })
+                }
                 TokenType::This => Ok(Expr::This {
                     id: next_id(),
-                    keyword: token.lexeme.to_string(),
+                    keyword: "this",
                 }),
                 _ => Parser::expected_expression(None),
             }

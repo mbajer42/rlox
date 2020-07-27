@@ -113,7 +113,35 @@ impl Interpreter {
                 };
                 Err(LoxError::Return(value))
             }
-            Stmt::Class { name, methods } => {
+            Stmt::Class {
+                name,
+                superclass,
+                methods,
+            } => {
+                let (super_object, super_loxclass) = if let Some(superclass) = superclass {
+                    let super_object = self.evaluate(superclass)?;
+                    if let Object::Class(super_loxclass) = super_object.as_ref() {
+                        (Some(Rc::clone(&super_object)), Some(super_loxclass.clone()))
+                    } else {
+                        return Err(LoxError::InterpreterError(
+                            "Superclass must be a class".into(),
+                        ));
+                    }
+                } else {
+                    (None, None)
+                };
+
+                let method_environment = if super_object.is_some() {
+                    let env = Rc::new(RefCell::new(Environment::with_enclosing(Rc::clone(
+                        &self.environment,
+                    ))));
+                    env.borrow_mut()
+                        .define("super", Rc::clone(&super_object.unwrap()));
+                    env
+                } else {
+                    Rc::clone(&self.environment)
+                };
+
                 let mut name_to_method = HashMap::new();
                 for method in methods.as_ref() {
                     if let Stmt::Function {
@@ -127,7 +155,7 @@ impl Interpreter {
                             Rc::new(LoxFunction::new(
                                 parameters.clone(),
                                 body.clone(),
-                                self.environment.clone(),
+                                Rc::clone(&method_environment),
                                 name == "init",
                             )),
                         );
@@ -135,11 +163,15 @@ impl Interpreter {
                         unreachable!()
                     }
                 }
+
                 let class = Rc::new(Object::Class(Rc::new(LoxClass::new(
                     name.to_string(),
+                    super_loxclass,
                     name_to_method,
                 ))));
+
                 self.environment.borrow_mut().define(name, class);
+
                 Ok(())
             }
         }
@@ -191,6 +223,29 @@ impl Interpreter {
                     self.environment.borrow().get(depth, keyword)
                 } else {
                     self.globals.borrow().get(0, keyword)
+                }
+            }
+            Expr::Super {
+                id,
+                keyword,
+                method: method_name,
+            } => {
+                let depth = self.get_locals_depth(id).unwrap();
+                let superclass = self.environment.borrow().get(depth, keyword)?;
+
+                // "this" is always one depth closer than "super"'s environment
+                let superobject = self.environment.borrow().get(depth - 1, "this")?;
+                if let Object::Class(superclass) = superclass.as_ref() {
+                    let method = superclass.find_method(method_name);
+                    if let Some(method) = method {
+                        Ok(Rc::new(Object::Function(Rc::new(method.bind(superobject)))))
+                    } else {
+                        Err(LoxError::InterpreterError(
+                            format!("Undefined property '{}'.", method_name).into(),
+                        ))
+                    }
+                } else {
+                    unreachable!()
                 }
             }
             Expr::Assign { id, name, value } => {
@@ -602,11 +657,11 @@ mod tests {
     fn method_calls() {
         let source = r#"
             class Person {
-                fun init(name) {
+                init(name) {
                     this.name = name;
                 }
 
-                fun hi() {
+                hi() {
                     return "Hi, my name is " + this.name;
                 }
             }
@@ -616,5 +671,28 @@ mod tests {
         let interpreter = interpret(source);
         let hi = interpreter.environment.borrow().get(0, "hiAlice").unwrap();
         assert_eq!(*hi, Object::String("Hi, my name is Alice".to_owned()));
+    }
+
+    #[test]
+    fn super_method_calls() {
+        let source = r#"
+            class Duck {
+                type() {
+                    return "Duck";
+                }
+            }
+
+            class MallardDuck < Duck {
+                type() {
+                    return "Mallard" + super.type();
+                }
+            }
+
+            var duck = MallardDuck();
+            var type = duck.type();
+        "#;
+        let interpreter = interpret(source);
+        let duck_type = interpreter.environment.borrow().get(0, "type").unwrap();
+        assert_eq!(*duck_type, Object::String("MallardDuck".to_owned()));
     }
 }

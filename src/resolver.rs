@@ -15,6 +15,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    SubClass,
 }
 
 pub type Depth = u64;
@@ -103,11 +104,37 @@ impl<'a> Resolver<'a> {
                 self.resolve_expression(condition)?;
                 self.resolve_statement(body)?;
             }
-            Stmt::Class { name, methods } => {
+            Stmt::Class {
+                name,
+                superclass,
+                methods,
+            } => {
                 let enclosing_class = self.current_class;
                 self.current_class = ClassType::Class;
                 self.declare(name);
                 self.define(name);
+
+                if let Some(superclass) = superclass {
+                    if let Expr::Variable {
+                        id: _,
+                        name: superclass_name,
+                    } = superclass.as_ref()
+                    {
+                        if name == superclass_name {
+                            return Err(LoxError::ResolverError(
+                                "A class cannot inherit from itself.",
+                            ));
+                        }
+                    }
+
+                    self.current_class = ClassType::SubClass;
+                    self.resolve_expression(superclass)?;
+
+                    self.begin_scope();
+                    self.scopes
+                        .last_mut()
+                        .map(|scope| scope.insert("super", true));
+                }
                 self.begin_scope();
                 self.scopes
                     .last_mut()
@@ -132,6 +159,11 @@ impl<'a> Resolver<'a> {
                 }
 
                 self.end_scope();
+
+                if superclass.is_some() {
+                    self.end_scope();
+                }
+
                 self.current_class = enclosing_class;
             }
         };
@@ -176,6 +208,23 @@ impl<'a> Resolver<'a> {
                 if self.current_class == ClassType::None {
                     return Err(LoxError::ResolverError(
                         "Cannot use 'this' outside of a class.",
+                    ));
+                }
+                self.resolve_local(*id, keyword);
+            }
+            Expr::Super {
+                id,
+                keyword,
+                method: _,
+            } => {
+                if self.current_class == ClassType::None {
+                    return Err(LoxError::ResolverError(
+                        "Cannot use 'super' outside of a class.",
+                    ));
+                }
+                if self.current_class != ClassType::SubClass {
+                    return Err(LoxError::ResolverError(
+                        "Cannot use 'super' in a class with no superclass.",
                     ));
                 }
                 self.resolve_local(*id, keyword);
@@ -323,7 +372,7 @@ mod tests {
     fn cannot_return_from_initializer() {
         let source = r#"
             class Foo {
-                fun init() {
+                init() {
                     return "invalid";
                 }
             }
@@ -333,6 +382,34 @@ mod tests {
         assert_eq!(
             scopes.unwrap_err(),
             LoxError::ResolverError("Cannot return a value from an initializer.")
+        );
+    }
+
+    #[test]
+    fn cannot_use_super_outside_of_class() {
+        let source = "super.foo();";
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_err(), true);
+        assert_eq!(
+            scopes.unwrap_err(),
+            LoxError::ResolverError("Cannot use 'super' outside of a class.")
+        );
+    }
+
+    #[test]
+    fn cannot_use_super_in_non_subclass() {
+        let source = r#"
+            class Foo {
+                foo() {
+                    super.foo();
+                }
+            }
+        "#;
+        let scopes = scopes(source);
+        assert_eq!(scopes.is_err(), true);
+        assert_eq!(
+            scopes.unwrap_err(),
+            LoxError::ResolverError("Cannot use 'super' in a class with no superclass.")
         );
     }
 }
